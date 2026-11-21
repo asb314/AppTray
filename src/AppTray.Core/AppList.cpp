@@ -128,6 +128,9 @@ namespace apptray
 				}
 				item.target = user.target.value_or(item.target);
 				item.args = user.args.value_or(L"");
+				item.autostart = user.autostart;
+				item.askDefault = user.askDefault;
+				item.elevatedTask = user.elevatedTask;
 			}
 			item.searchText = FoldForSearch(item.name + L" " + entry.id + L" " + entry.description + L" " + item.category);
 			items.push_back(std::move(item));
@@ -299,5 +302,21 @@ namespace apptray
 		filter.kind = kind;
 		return static_cast<size_t>(
 			std::count_if(items.begin(), items.end(), [&](const AppItem& item) { return MatchesKind(item, filter); }));
+	}
+
+	AutostartPlan PlanAutostart(const std::vector<AppItem>& items, const std::function<bool(const AppItem&)>& isRunning)
+	{
+		AutostartPlan plan;
+		for (size_t i = 0; i < items.size(); ++i)
+		{
+			const AppItem& item = items[i];
+			if (item.autostart == AutostartMode::No || item.hidden || item.entry->missing || item.target.empty()
+				|| isRunning(item))
+			{
+				continue;
+			}
+			(item.autostart == AutostartMode::Always ? plan.open : plan.ask).push_back(i);
+		}
+		return plan;
 	}
 }

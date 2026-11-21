@@ -233,6 +233,21 @@ namespace apptray
 		ChangeOverride(settings, id, [&](AppOverride& item) { item.expand = expanded; });
 	}
 
+	void SetAutostart(UserSettings& settings, const std::wstring& id, AutostartMode mode)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.autostart = mode; });
+	}
+
+	void SetAskDefault(UserSettings& settings, const std::wstring& id, bool checked)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.askDefault = checked; });
+	}
+
+	void SetElevatedTask(UserSettings& settings, const std::wstring& id, bool enabled)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.elevatedTask = enabled; });
+	}
+
 	UserSettings LoadUserSettings(const fs::path& file, std::wstring& error)
 	{
 		UserSettings settings;
@@ -253,10 +268,10 @@ namespace apptray
 
 		const Json& document = *json;
 		settings.root = GetOptionalString(document, "root");
-		settings.startWithWindows = GetBool(document, "startWithWindows", settings.startWithWindows);
 		settings.startupDelaySeconds = GetInt(document, "startupDelaySeconds", settings.startupDelaySeconds);
 		settings.startupPromptSeconds = GetInt(document, "startupPromptSeconds", settings.startupPromptSeconds);
 		settings.categoryDepth = std::clamp(GetInt(document, "categoryDepth", settings.categoryDepth), 0, 20);
+		settings.checkForUpdates = GetBool(document, "checkForUpdates", settings.checkForUpdates);
 		if (const auto scan = document.find("scan"); scan != document.end() && scan->is_object())
 		{
 			settings.scan.maxDepth = std::clamp(GetInt(*scan, "maxDepth", settings.scan.maxDepth), 1, 20);
@@ -290,10 +305,11 @@ namespace apptray
 		{
 			json.erase("root");
 		}
-		json["startWithWindows"] = settings.startWithWindows;
+		json.erase("startWithWindows"); // replaced by the Run registry value (tray menu)
 		json["startupDelaySeconds"] = settings.startupDelaySeconds;
 		json["startupPromptSeconds"] = settings.startupPromptSeconds;
 		json["categoryDepth"] = settings.categoryDepth;
+		json["checkForUpdates"] = settings.checkForUpdates;
 
 		Json scan = json.contains("scan") && json["scan"].is_object() ? json["scan"] : Json::object();
 		scan["maxDepth"] = settings.scan.maxDepth;

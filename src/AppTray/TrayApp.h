@@ -1,10 +1,12 @@
 #pragma once
 
+#include "AppLauncher.h"
 #include "AppList.h"
 #include "Catalog.h"
 #include "LauncherWindow.h"
 #include "PathResolver.h"
 #include "TrayIcon.h"
+#include "UpdateCheck.h"
 #include "UserSettings.h"
 
 #include <windows.h>
@@ -41,8 +43,9 @@ namespace apptray
 		TrayApp(const TrayApp&) = delete;
 		TrayApp& operator=(const TrayApp&) = delete;
 
-		// Message loop; returns the exit code
-		int Run(bool showLauncher);
+		// Message loop; returns the exit code. atLogon: started by Windows (--startup), so open the
+		// logon apps after the configured delay.
+		int Run(bool showLauncher, bool atLogon);
 
 		// Used by the launcher window
 		HINSTANCE Instance() const
@@ -72,6 +75,8 @@ namespace apptray
 		void SetItemHidden(size_t index, bool hidden);
 		void SetItemTarget(size_t index, std::optional<std::wstring> target);
 		void SetSuiteExpanded(const std::wstring& id, bool expanded);
+		void SetItemAutostart(size_t index, AutostartMode mode);
+		void SetItemElevated(size_t index, bool enabled);
 		void StartRefresh();
 		void OnLauncherClosed();
 
@@ -113,6 +118,14 @@ namespace apptray
 		void OpenSettingsFile();
 		void OnScanDone(DWORD exitCode);
 		void ReportError(std::wstring_view title, std::wstring_view text);
+		bool StartChildProcess(const std::wstring& arguments, UINT doneMessage, std::jthread& waiter);
+		LaunchResult StartItem(const AppItem& item, bool asAdmin, bool atLogon = false);
+		void RunLogonApps();
+		void ToggleStartWithWindows();
+		void CheckForUpdates();
+		void OnUpdateCheckDone(DWORD exitCode);
+		void ApplyUpdateState();
+		void OnElevatedTaskDone(DWORD exitCode);
 
 		HINSTANCE instance_;
 		AppPaths paths_;
@@ -139,7 +152,17 @@ namespace apptray
 		bool refreshAgain_ = false;   // asked while a scan was running (with newer settings)
 		int menuDepth_ = 0;
 		std::optional<DWORD> pendingScanExit_; // exit code of a scan that ended during a menu
+		std::optional<DWORD> pendingTaskExit_; // same for the elevated --register-task copy
 		bool exiting_ = false;
+
+		std::jthread updateThread_;            // waits for "AppTray.exe --check-update"
+		bool updateChecking_ = false;
+		ULONGLONG nextUpdateCheck_ = 0;        // GetTickCount64 from which a check is due
+		std::optional<ReleaseInfo> newRelease_; // newer than this AppTray
+
+		std::jthread elevationThread_;         // waits for the elevated --register-task copy
+		std::wstring pendingTaskId_;
+		bool pendingTaskEnable_ = false;
 
 		// Tray menu state, valid while the menu is open
 		std::unordered_map<HMENU, std::wstring> categoryMenus_;

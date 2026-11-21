@@ -54,6 +54,7 @@
 		<ClInclude Include="IconLoader.h" />
 		<ClInclude Include="LauncherWindow.h" />
 		<ClInclude Include="resource.h" />
+		<ClInclude Include="StartupPrompt.h" />
 		<ClInclude Include="Strings.h" />
 		<ClInclude Include="Theme.h" />
 		<ClInclude Include="TrayApp.h" />
@@ -64,6 +65,7 @@
 		<ClCompile Include="IconLoader.cpp" />
 		<ClCompile Include="LauncherWindow.cpp" />
 		<ClCompile Include="main.cpp" />
+		<ClCompile Include="StartupPrompt.cpp" />
 		<ClCompile Include="Theme.cpp" />
 		<ClCompile Include="TrayApp.cpp" />
 		<ClCompile Include="TrayIcon.cpp" />

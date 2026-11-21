@@ -13,6 +13,8 @@ namespace apptray::text
 	inline constexpr wchar_t Refresh[] = L"Refrescar";
 	inline constexpr wchar_t Refreshing[] = L"Refrescando…";
 	inline constexpr wchar_t EditSettings[] = L"Editar configuración";
+	inline constexpr wchar_t StartWithWindows[] = L"Iniciar con Windows";
+	inline constexpr wchar_t NewVersionMenu[] = L"Nueva versión {} disponible…";
 	inline constexpr wchar_t Exit[] = L"Salir";
 
 	// Launcher window
@@ -43,6 +45,11 @@ namespace apptray::text
 	inline constexpr wchar_t ResetExecutable[] = L"Volver al que eligió AppTray";
 	inline constexpr wchar_t ExpandSuite[] = L"Mostrar sus programas por separado";
 	inline constexpr wchar_t CollapseSuite[] = L"Agrupar en una sola entrada";
+	inline constexpr wchar_t AtLogon[] = L"Al iniciar sesión";
+	inline constexpr wchar_t AutostartNo[] = L"No abrir";
+	inline constexpr wchar_t AutostartAlways[] = L"Abrir siempre";
+	inline constexpr wchar_t AutostartAsk[] = L"Preguntar (casilla al iniciar)";
+	inline constexpr wchar_t RunWithoutUac[] = L"Abrir sin UAC (tarea elevada)";
 	inline constexpr wchar_t Hide[] = L"Ocultar";
 	inline constexpr wchar_t Unhide[] = L"Volver a mostrar";
 
@@ -55,5 +62,21 @@ namespace apptray::text
 	inline constexpr wchar_t LaunchFailed[] = L"No se pudo abrir";
 	inline constexpr wchar_t CatalogSaveFailed[] = L"No se pudo guardar el catálogo";
 	inline constexpr wchar_t RefreshFailed[] = L"No se pudo refrescar";
+	inline constexpr wchar_t TaskFailed[] = L"No se pudo cambiar la tarea elevada";
+	inline constexpr wchar_t NeedsElevatedTask[] =
+		L"{} pide administrador: actívale «Abrir sin UAC» para abrirlo al iniciar sesión";
+	inline constexpr wchar_t ElevatedTaskStale[] =
+		L"la tarea elevada sigue abriendo el ejecutable anterior: desactiva y activa «Abrir sin UAC»";
+	inline constexpr wchar_t NewVersionTitle[] = L"Nueva versión de AppTray";
+	inline constexpr wchar_t NewVersionText[] = L"La {} está disponible (tienes la {}). Menú del icono → Nueva versión.";
+	inline constexpr wchar_t LogonTitle[] = L"Inicio de sesión";
+
+	// Logon dialog
+	inline constexpr wchar_t StartupPromptTitle[] = L"Inicio de sesión";
+	inline constexpr wchar_t StartupPromptLabel[] = L"Abrir también:";
+	inline constexpr wchar_t CountdownPrefix[] = L"Se continúa en";
+	inline constexpr wchar_t CountdownStopped[] = L"Pulsa Abrir para continuar";
+	inline constexpr wchar_t OpenButton[] = L"Abrir";
+	inline constexpr wchar_t NoneButton[] = L"Ninguna";
 	inline constexpr wchar_t SettingsFixBeforeRefresh[] = L"corrígelo (Editar configuración) antes de refrescar";
 }

@@ -47,16 +47,21 @@
 		<ClInclude Include="CatalogMerger.h" />
 		<ClInclude Include="CatalogRefresher.h" />
 		<ClInclude Include="CommandLine.h" />
+		<ClInclude Include="ElevatedTask.h" />
 		<ClInclude Include="ExeInspector.h" />
 		<ClInclude Include="ExeRanker.h" />
 		<ClInclude Include="FolderScanner.h" />
 		<ClInclude Include="JsonFile.h" />
 		<ClInclude Include="Log.h" />
+		<ClInclude Include="LogonRegistration.h" />
 		<ClInclude Include="NameTokens.h" />
 		<ClInclude Include="PathResolver.h" />
+		<ClInclude Include="ProcessFinder.h" />
 		<ClInclude Include="ScanReport.h" />
 		<ClInclude Include="StringUtil.h" />
+		<ClInclude Include="UpdateCheck.h" />
 		<ClInclude Include="UserSettings.h" />
+		<ClInclude Include="Version.h" />
 	</ItemGroup>
 	<ItemGroup>
 		<ClCompile Include="AppEntry.cpp" />
@@ -66,15 +71,19 @@
 		<ClCompile Include="CatalogMerger.cpp" />
 		<ClCompile Include="CatalogRefresher.cpp" />
 		<ClCompile Include="CommandLine.cpp" />
+		<ClCompile Include="ElevatedTask.cpp" />
 		<ClCompile Include="ExeInspector.cpp" />
 		<ClCompile Include="ExeRanker.cpp" />
 		<ClCompile Include="FolderScanner.cpp" />
 		<ClCompile Include="JsonFile.cpp" />
 		<ClCompile Include="Log.cpp" />
+		<ClCompile Include="LogonRegistration.cpp" />
 		<ClCompile Include="NameTokens.cpp" />
 		<ClCompile Include="PathResolver.cpp" />
+		<ClCompile Include="ProcessFinder.cpp" />
 		<ClCompile Include="ScanReport.cpp" />
 		<ClCompile Include="StringUtil.cpp" />
+		<ClCompile Include="UpdateCheck.cpp" />
 		<ClCompile Include="UserSettings.cpp" />
 	</ItemGroup>
 	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -4,6 +4,7 @@
 #include "UserSettings.h"
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,9 @@ namespace apptray
 		bool hidden = false;             // hidden by the user
 		bool hiddenByDefault = false;    // installer or backup copy
 		bool isNew = false;              // found after the first scan, within the last 30 days
+		AutostartMode autostart = AutostartMode::No;
+		bool askDefault = false;         // checked in the logon dialog
+		bool elevatedTask = false;       // started through its own elevated scheduled task
 		std::wstring searchText;         // folded name, id, description and category
 	};
 
@@ -74,4 +78,14 @@ namespace apptray
 
 	// Counts for the fixed filters, to show or hide them in the UI
 	size_t CountAppItems(const std::vector<AppItem>& items, AppFilterKind kind);
+
+	// What to do at logon: apps set to "always" to open now, apps set to "ask" to offer in the
+	// dialog. Apps already running, missing, hidden or without an executable are left out.
+	struct AutostartPlan
+	{
+		std::vector<size_t> open;
+		std::vector<size_t> ask;
+	};
+
+	AutostartPlan PlanAutostart(const std::vector<AppItem>& items, const std::function<bool(const AppItem&)>& isRunning);
 }

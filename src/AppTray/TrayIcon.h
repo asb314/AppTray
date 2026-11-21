@@ -15,8 +15,9 @@ namespace apptray
 	public:
 		~TrayIcon();
 
-		// Adds the icon; call again after Explorer restarts ("TaskbarCreated")
-		bool Add(HWND owner, UINT callbackMessage, HICON icon, std::wstring_view tip);
+		// Adds the icon; call again after Explorer restarts ("TaskbarCreated"). With a GUID the
+		// icon keeps its identity across runs; without one (or if Windows refuses it) it uses an id.
+		bool Add(HWND owner, UINT callbackMessage, HICON icon, std::wstring_view tip, const std::optional<GUID>& guid);
 		void Remove();
 		void SetTip(std::wstring_view tip);
 		void ShowNotification(std::wstring_view title, std::wstring_view text, bool warning);

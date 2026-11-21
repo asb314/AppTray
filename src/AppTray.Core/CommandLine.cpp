@@ -46,6 +46,22 @@ namespace apptray
 			{
 				options.verbose = true;
 			}
+			else if (EqualsIgnoreCase(argument, L"--check-update"))
+			{
+				options.checkUpdate = true;
+			}
+			else if (EqualsIgnoreCase(argument, L"--register-task"))
+			{
+				options.registerTask = takeValue();
+			}
+			else if (EqualsIgnoreCase(argument, L"--unregister-task"))
+			{
+				options.unregisterTask = takeValue();
+			}
+			else if (EqualsIgnoreCase(argument, L"--task-user"))
+			{
+				options.taskUser = takeValue();
+			}
 			else if (EqualsIgnoreCase(argument, L"--root"))
 			{
 				options.root = takeValue();
@@ -85,7 +101,8 @@ namespace apptray
 
 	std::wstring GetUsageText()
 	{
-		return L"AppTray.exe [--scan [--report file.md] [--verbose]] [--root folder] [--data folder]";
+		return L"AppTray.exe [--show | --exit | --startup | --scan [--report file.md] [--verbose] | --check-update]"
+			   L" [--root folder] [--data folder]";
 	}
 
 	std::wstring QuoteArgument(std::wstring_view argument)

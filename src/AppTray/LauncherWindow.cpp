@@ -45,6 +45,10 @@ namespace apptray
 			ExpandCommand,
 			CollapseCommand,
 			ResetTargetCommand,
+			AutostartNoCommand,
+			AutostartAlwaysCommand,
+			AutostartAskCommand,
+			ElevatedCommand,
 			AlternativeCommandBase = 100,
 		};
 
@@ -751,6 +755,21 @@ namespace apptray
 		{
 			AppendMenuW(menu, MF_STRING, CollapseCommand, text::CollapseSuite);
 		}
+		// Logon behaviour and elevation (programs only, not a suite's folder)
+		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		HMENU logon = CreatePopupMenu();
+		const auto addMode = [&](AutostartMode mode, UINT id, const wchar_t* label)
+		{ AppendMenuW(logon, MF_STRING | (item.autostart == mode ? MF_CHECKED : 0), id, label); };
+		addMode(AutostartMode::No, AutostartNoCommand, text::AutostartNo);
+		addMode(AutostartMode::Always, AutostartAlwaysCommand, text::AutostartAlways);
+		addMode(AutostartMode::Ask, AutostartAskCommand, text::AutostartAsk);
+		AppendMenuW(menu, MF_POPUP | (isSuite ? MF_GRAYED : 0), reinterpret_cast<UINT_PTR>(logon), text::AtLogon);
+		const bool isProgram = !isSuite && EndsWithIgnoreCase(item.target, L".exe");
+		// Copied: a finished elevation can rebuild the items while the menu is open
+		const bool elevated = item.elevatedTask;
+		AppendMenuW(
+			menu, MF_STRING | (elevated ? MF_CHECKED : 0) | (isProgram ? 0 : MF_GRAYED), ElevatedCommand,
+			text::RunWithoutUac);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, item.hidden ? UnhideCommand : HideCommand, item.hidden ? text::Unhide : text::Hide);
 
@@ -791,6 +810,18 @@ namespace apptray
 			break;
 		case ResetTargetCommand:
 			app_.SetItemTarget(index, std::nullopt);
+			break;
+		case AutostartNoCommand:
+			app_.SetItemAutostart(index, AutostartMode::No);
+			break;
+		case AutostartAlwaysCommand:
+			app_.SetItemAutostart(index, AutostartMode::Always);
+			break;
+		case AutostartAskCommand:
+			app_.SetItemAutostart(index, AutostartMode::Ask);
+			break;
+		case ElevatedCommand:
+			app_.SetItemElevated(index, !elevated);
 			break;
 		default:
 			if (command == AlternativeCommandBase)

@@ -1,15 +1,21 @@
 // AppTray entry point: the tray program, or a command-line scan with --scan.
 
+#include "AppList.h"
 #include "Catalog.h"
 #include "CatalogRefresher.h"
 #include "CommandLine.h"
+#include "ElevatedTask.h"
 #include "Log.h"
 #include "PathResolver.h"
 #include "ScanReport.h"
 #include "StringUtil.h"
 #include "TrayApp.h"
 #include "UiCommon.h"
+#include "UpdateCheck.h"
 #include "UserSettings.h"
+#include "Version.h"
+
+#include <algorithm>
 
 #include <windows.h>
 
@@ -188,6 +194,75 @@ namespace
 		return 0;
 	}
 
+	// --check-update: one request to GitHub, the answer in data\update.json for the tray to read
+	int RunUpdateCheck(const fs::path& dataDirectory)
+	{
+		const fs::path stateFile = dataDirectory / L"update.json";
+		UpdateState state = LoadUpdateState(stateFile).value_or(UpdateState{});
+		std::wstring error;
+		const std::optional<ReleaseInfo> release = FetchLatestRelease(APPTRAY_REPOSITORY, error);
+		if (!error.empty())
+		{
+			WriteLog(L"update check: " + error);
+			return ExitCodeScanFailed;
+		}
+		state.checkedAt = FormatUtcNow();
+		state.latestVersion = release ? release->version : std::wstring{};
+		state.url = release ? release->url : std::wstring{};
+		SaveUpdateState(stateFile, state, error);
+		const bool newer = release && CompareVersions(release->version, APPTRAY_VERSION_WIDE) > 0;
+		WriteLog(std::format(
+			L"update check: latest {}, running {}", release ? release->version : L"(none)", APPTRAY_VERSION_WIDE));
+		return newer ? ExitCodeUpdateAvailable : 0;
+	}
+
+	// --register-task / --unregister-task <id>: started elevated by the tray (one UAC prompt).
+	// Reads the catalog and user.json (never writes them) to find what the app launches.
+	int RunTaskRegistration(const CommandLineOptions& options, const fs::path& exeDirectory, const fs::path& dataDirectory)
+	{
+		const bool registering = options.registerTask.has_value();
+		const std::wstring id = registering ? *options.registerTask : *options.unregisterTask;
+		std::wstring error;
+		const UserSettings settings = LoadUserSettings(dataDirectory / L"user.json", error);
+		const std::optional<Catalog> catalog = LoadCatalog(dataDirectory / L"catalog.json", error);
+		if (!catalog)
+		{
+			WriteLog(L"elevated task: " + error);
+			return ExitCodeScanFailed;
+		}
+		const std::vector<AppItem> items = BuildAppItems(*catalog, settings, FormatUtcNow());
+		const auto item = std::find_if(
+			items.begin(), items.end(), [&](const AppItem& candidate) { return IsSameRelative(candidate.entry->id, id); });
+		if (item == items.end())
+		{
+			WriteLog(L"elevated task: unknown app " + id);
+			return ExitCodeScanFailed;
+		}
+
+		const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+		const std::wstring taskName = MakeElevatedTaskName(item->entry->id);
+		bool done = false;
+		if (registering)
+		{
+			const fs::path root = PathResolver::ResolveRoot(options.root, settings.root, exeDirectory);
+			const std::optional<fs::path> target = PathResolver(root).ToAbsolute(item->target);
+			// The user of the AppTray that asked, not the account that approved the UAC prompt
+			const std::wstring user = options.taskUser.value_or(GetCurrentUserName());
+			done = target && RegisterElevatedTask(taskName, *target, item->args, user, error);
+		}
+		else
+		{
+			done = DeleteElevatedTask(taskName, error);
+		}
+		if (SUCCEEDED(com))
+		{
+			CoUninitialize();
+		}
+		WriteLog(std::format(
+			L"elevated task {} {}: {}", registering ? L"created" : L"deleted", taskName, done ? L"ok" : error));
+		return done ? 0 : ExitCodeScanFailed;
+	}
+
 	// One tray icon per AppTray folder. A second start forwards --show / --exit to the copy of
 	// the same folder (its hidden window is titled with the instance name), waiting a little if
 	// that copy is still loading its catalog.
@@ -228,6 +303,14 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 	{
 		return RunScan(options, exeDirectory, dataDirectory);
 	}
+	if (options.checkUpdate)
+	{
+		return RunUpdateCheck(dataDirectory);
+	}
+	if (options.registerTask || options.unregisterTask)
+	{
+		return RunTaskRegistration(options, exeDirectory, dataDirectory);
+	}
 
 	const std::wstring instanceName = GetInstanceName(exeDirectory.wstring());
 	wil::unique_mutex_nothrow instanceMutex(CreateMutexW(nullptr, FALSE, (L"Local\\" + instanceName).c_str()));
@@ -252,7 +335,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 	int exitCode = 0;
 	{
 		TrayApp app(instance, {exeDirectory, dataDirectory, options.root, instanceName});
-		exitCode = app.Run(options.show);
+		exitCode = app.Run(options.show, options.startup);
 	}
 	if (SUCCEEDED(com))
 	{

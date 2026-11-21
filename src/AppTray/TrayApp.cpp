@@ -2,8 +2,13 @@
 
 #include "AppLauncher.h"
 #include "CommandLine.h"
+#include "ElevatedTask.h"
 #include "IconLoader.h"
 #include "Log.h"
+#include "LogonRegistration.h"
+#include "ProcessFinder.h"
+#include "StartupPrompt.h"
+#include "Version.h"
 #include "Strings.h"
 #include "StringUtil.h"
 #include "Theme.h"
@@ -28,11 +33,16 @@ namespace apptray
 			OpenLauncherCommand = 1,
 			RefreshCommand,
 			SettingsCommand,
+			StartWithWindowsCommand,
+			NewVersionCommand,
 			ExitCommand,
 			AppCommandBase = 10000,
 		};
 
 		constexpr ULONGLONG ReopenGuardMilliseconds = 400;
+		constexpr UINT_PTR LogonTimerId = 1;
+		constexpr UINT_PTR UpdateTimerId = 2;
+		constexpr UINT UpdateCheckDelayMilliseconds = 60 * 1000; // not while the logon apps start
 
 		// Parsing JSON and scanning leave freed blocks committed in the heap; give them back so
 		// the idle tray keeps a small footprint
@@ -308,6 +318,49 @@ namespace apptray
 		}
 	}
 
+	// The one way an app gets started: its elevated task when it has one (no UAC prompt),
+	// otherwise the shell (a suite opens its folder). A missing exe skips the task, so the
+	// shell reports "not found" instead of the task failing out of sight.
+	LaunchResult TrayApp::StartItem(const AppItem& item, bool asAdmin, bool atLogon)
+	{
+		const std::optional<fs::path> path = ResolveTarget(item);
+		if (!path)
+		{
+			return {false, false, ERROR_PATH_NOT_FOUND};
+		}
+		std::error_code missing;
+		if (item.elevatedTask && !item.target.empty() && fs::is_regular_file(*path, missing))
+		{
+			std::wstring error;
+			const ElevatedTaskRun run = RunElevatedTask(MakeElevatedTaskName(item.entry->id), *path, item.args, error);
+			if (run == ElevatedTaskRun::Started)
+			{
+				WriteLog(L"started (elevated task) " + path->wstring());
+				return {true, false, 0};
+			}
+			WriteLog(std::format(L"elevated task of {} not used: {}", item.name, error));
+			if (run == ElevatedTaskRun::Stale)
+			{
+				ReportError(text::TaskFailed, std::format(L"{}: {}", item.name, text::ElevatedTaskStale));
+			}
+			if (atLogon)
+			{
+				// The task exists to avoid a UAC prompt at logon: never fall back to one
+				if (run != ElevatedTaskRun::Stale)
+				{
+					ReportError(text::TaskFailed, std::format(L"{}: {}", item.name, error));
+				}
+				return {false, true, 0};
+			}
+		}
+		const LaunchResult result = item.target.empty() ? OpenWithShell(*path) : LaunchProgram(*path, item.args, asAdmin);
+		if (result.started)
+		{
+			WriteLog(std::format(L"started {}{}", path->wstring(), asAdmin ? L" (admin)" : L""));
+		}
+		return result;
+	}
+
 	void TrayApp::LaunchItem(size_t index, bool asAdmin)
 	{
 		if (index >= items_.size())
@@ -315,16 +368,9 @@ namespace apptray
 			return;
 		}
 		const AppItem& item = items_[index];
-		const std::optional<fs::path> path = ResolveTarget(item);
-		if (!path)
-		{
-			ReportError(text::LaunchFailed, item.name);
-			return;
-		}
-		const LaunchResult result = item.target.empty() ? OpenWithShell(*path) : LaunchProgram(*path, item.args, asAdmin);
+		const LaunchResult result = StartItem(item, asAdmin);
 		if (result.started)
 		{
-			WriteLog(std::format(L"launched {}{}", path->wstring(), asAdmin ? L" (admin)" : L""));
 			launcher_.RequestClose(); // called from list-view notifications: never destroy it now
 		}
 		else if (!result.cancelled)
@@ -428,6 +474,11 @@ namespace apptray
 		RebuildItems();
 		menuBitmaps_.clear();
 		launcher_.RefreshItems();
+		if (items_[index].elevatedTask)
+		{
+			// The task still points at the old exe
+			ReportError(text::TaskFailed, std::format(L"{}: {}", items_[index].name, text::ElevatedTaskStale));
+		}
 	}
 
 	void TrayApp::SetSuiteExpanded(const std::wstring& id, bool expanded)
@@ -468,9 +519,23 @@ namespace apptray
 		// The scan runs in a child process ("AppTray.exe --scan"): its threads, heap and loaded
 		// files go away with it, so the tray stays small however big the tree is. Writing
 		// catalog.json is atomic, so killing the child on exit never leaves a broken file.
-		std::wstring commandLine = std::format(
-			L"{} --scan --root {} --data {}", QuoteArgument(exePath_.wstring()), QuoteArgument(root_.wstring()),
-			QuoteArgument(paths_.dataDirectory.wstring()));
+		const std::wstring arguments = std::format(
+			L"--scan --root {} --data {}", QuoteArgument(root_.wstring()), QuoteArgument(paths_.dataDirectory.wstring()));
+		if (!StartChildProcess(arguments, WM_APP_SCAN_DONE, scanThread_))
+		{
+			ReportError(text::RefreshFailed, DescribeLaunchError({false, false, GetLastError()}));
+			return;
+		}
+		scanning_ = true;
+		UpdateTip();
+		launcher_.SetStatus(text::Refreshing);
+	}
+
+	// Starts "AppTray.exe <arguments>" at below-normal priority and a thread that posts
+	// doneMessage(exit code) when it ends. Exiting AppTray stops the thread and kills the child.
+	bool TrayApp::StartChildProcess(const std::wstring& arguments, UINT doneMessage, std::jthread& waiter)
+	{
+		std::wstring commandLine = QuoteArgument(exePath_.wstring()) + L" " + arguments;
 		STARTUPINFOW startup{};
 		startup.cb = sizeof(startup);
 		PROCESS_INFORMATION process{};
@@ -478,18 +543,17 @@ namespace apptray
 				exePath_.c_str(), commandLine.data(), nullptr, nullptr, FALSE, BELOW_NORMAL_PRIORITY_CLASS, nullptr,
 				paths_.exeDirectory.c_str(), &startup, &process))
 		{
-			ReportError(text::RefreshFailed, DescribeLaunchError({false, false, GetLastError()}));
-			return;
+			return false;
 		}
 		CloseHandle(process.hThread);
 		wil::unique_handle child(process.hProcess);
-		scanning_ = true;
-		UpdateTip();
-		launcher_.SetStatus(text::Refreshing);
-
+		if (waiter.joinable())
+		{
+			waiter.join();
+		}
 		HWND window = window_;
-		scanThread_ = std::jthread(
-			[window, child = std::move(child)](std::stop_token stop)
+		waiter = std::jthread(
+			[window, doneMessage, child = std::move(child)](std::stop_token stop)
 			{
 				wil::unique_event stopped(CreateEventW(nullptr, TRUE, FALSE, nullptr));
 				const std::stop_callback onStop(stop, [&] { SetEvent(stopped.get()); });
@@ -502,8 +566,271 @@ namespace apptray
 				}
 				DWORD exitCode = 1;
 				GetExitCodeProcess(child.get(), &exitCode);
-				PostMessageW(window, WM_APP_SCAN_DONE, static_cast<WPARAM>(exitCode), 0);
+				PostMessageW(window, doneMessage, static_cast<WPARAM>(exitCode), 0);
 			});
+		return true;
+	}
+
+	void TrayApp::SetItemAutostart(size_t index, AutostartMode mode)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const std::wstring id = items_[index].entry->id;
+		const bool wasAsk = items_[index].autostart == AutostartMode::Ask;
+		if (!CanChangeSettings())
+		{
+			return;
+		}
+		SetAutostart(settings_, id, mode);
+		if (mode == AutostartMode::Ask && !wasAsk)
+		{
+			SetAskDefault(settings_, id, true); // newly offered: checked until the user says otherwise
+		}
+		SaveSettings();
+		RebuildItems();
+		launcher_.RefreshItems();
+		const AppItem& item = items_[index];
+		if (mode != AutostartMode::No && item.entry->requiresAdmin && !item.elevatedTask)
+		{
+			ReportError(text::LogonTitle, std::format(text::NeedsElevatedTask, item.name));
+		}
+	}
+
+	// Creating or deleting the task needs elevation: AppTray starts a copy of itself with "runas"
+	// (one UAC prompt) and records the change only when that copy succeeds
+	void TrayApp::SetItemElevated(size_t index, bool enabled)
+	{
+		if (index >= items_.size() || !pendingTaskId_.empty()) // one elevation at a time
+		{
+			return;
+		}
+		if (!CanChangeSettings())
+		{
+			return;
+		}
+		const std::wstring id = items_[index].entry->id;
+		// The elevated copy may run as another account (over-the-shoulder UAC): it gets this user
+		const std::wstring parameters = std::format(
+			L"{} {} --task-user {} --root {} --data {}", enabled ? L"--register-task" : L"--unregister-task",
+			QuoteArgument(id), QuoteArgument(GetCurrentUserName()), QuoteArgument(root_.wstring()),
+			QuoteArgument(paths_.dataDirectory.wstring()));
+		SHELLEXECUTEINFOW info{};
+		info.cbSize = sizeof(info);
+		info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+		info.hwnd = window_;
+		info.lpVerb = L"runas";
+		info.lpFile = exePath_.c_str();
+		info.lpParameters = parameters.c_str();
+		info.lpDirectory = paths_.exeDirectory.c_str();
+		info.nShow = SW_HIDE;
+		if (!ShellExecuteExW(&info) || info.hProcess == nullptr)
+		{
+			const DWORD error = GetLastError();
+			if (error != ERROR_CANCELLED)
+			{
+				ReportError(text::TaskFailed, DescribeLaunchError({false, false, error}));
+			}
+			return;
+		}
+		pendingTaskId_ = id;
+		pendingTaskEnable_ = enabled;
+		if (elevationThread_.joinable())
+		{
+			elevationThread_.join();
+		}
+		HWND window = window_;
+		elevationThread_ = std::jthread(
+			[window, process = wil::unique_handle(info.hProcess)](std::stop_token stop)
+			{
+				// The elevated copy cannot be killed from here; on exit just stop waiting
+				wil::unique_event stopped(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+				const std::stop_callback onStop(stop, [&] { SetEvent(stopped.get()); });
+				const HANDLE waits[] = {process.get(), stopped.get()};
+				if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0)
+				{
+					return;
+				}
+				DWORD exitCode = 1;
+				GetExitCodeProcess(process.get(), &exitCode);
+				PostMessageW(window, WM_APP_TASK_DONE, static_cast<WPARAM>(exitCode), 0);
+			});
+	}
+
+	void TrayApp::OnElevatedTaskDone(DWORD exitCode)
+	{
+		if (menuDepth_ > 0)
+		{
+			pendingTaskExit_ = exitCode; // the open menu holds references to the items
+			return;
+		}
+		const std::wstring id = std::exchange(pendingTaskId_, std::wstring{});
+		if (exiting_ || id.empty())
+		{
+			return;
+		}
+		if (exitCode != 0)
+		{
+			ReportError(text::TaskFailed, L"detalles en AppTray.log");
+			return;
+		}
+		if (!CanChangeSettings())
+		{
+			return;
+		}
+		SetElevatedTask(settings_, id, pendingTaskEnable_);
+		SaveSettings();
+		RebuildItems();
+		launcher_.RefreshItems();
+	}
+
+	// At logon (after the delay): open the "always" apps that are not running, then offer the
+	// "ask" ones in the dialog. The same rules StartupApps.ps1 had, for any app in the catalog.
+	void TrayApp::RunLogonApps()
+	{
+		ReloadSettingsIfChanged();
+		const MenuScope scope = EnterMenu(); // items stay put through the dialog
+		const std::vector<std::wstring> running = GetRunningImagePaths();
+		const AutostartPlan plan = PlanAutostart(
+			items_,
+			[&](const AppItem& item)
+			{
+				// A folder app counts as running when anything from its folder runs (launchers)
+				const bool isFolder = item.entry->kind == AppKind::Folder || item.entry->kind == AppKind::PortableApps;
+				const std::optional<fs::path> path = ResolvePath(isFolder ? item.entry->id : item.target);
+				return path && IsAppRunning(running, *path, isFolder);
+			});
+		WriteLog(std::format(L"logon: {} to open, {} to ask", plan.open.size(), plan.ask.size()));
+
+		const auto start = [&](size_t index)
+		{
+			const AppItem& item = items_[index];
+			// Without its elevated task an admin app would show a UAC prompt at every logon
+			if (item.entry->requiresAdmin && !item.elevatedTask)
+			{
+				WriteLog(L"logon: skipped " + item.name + L" (needs \"Abrir sin UAC\")");
+				trayIcon_.ShowNotification(text::LogonTitle, std::format(text::NeedsElevatedTask, item.name), true);
+				return;
+			}
+			const LaunchResult result = StartItem(item, false, true);
+			if (!result.started && !result.cancelled)
+			{
+				WriteLog(std::format(L"logon: {} failed: {}", item.name, DescribeLaunchError(result)));
+			}
+		};
+		for (const size_t index : plan.open)
+		{
+			start(index);
+		}
+		if (plan.ask.empty())
+		{
+			return;
+		}
+
+		std::vector<StartupChoice> choices;
+		for (const size_t index : plan.ask)
+		{
+			choices.push_back({index, items_[index].name, items_[index].askDefault});
+		}
+		const std::optional<std::vector<StartupChoice>> chosen =
+			ShowStartupPrompt(instance_, std::move(choices), settings_.startupPromptSeconds);
+		if (!chosen)
+		{
+			WriteLog(L"logon: \"Ninguna\" (saved choice unchanged)");
+			return;
+		}
+		// The accepted choice becomes next logon's default
+		if (CanChangeSettings())
+		{
+			for (const StartupChoice& choice : *chosen)
+			{
+				SetAskDefault(settings_, items_[choice.itemIndex].entry->id, choice.checked);
+			}
+			SaveSettings();
+		}
+		for (const StartupChoice& choice : *chosen)
+		{
+			if (choice.checked)
+			{
+				start(choice.itemIndex);
+			}
+		}
+		RebuildItems();
+		launcher_.RefreshItems();
+	}
+
+	void TrayApp::ToggleStartWithWindows()
+	{
+		std::wstring error;
+		// Unchecked while another copy is registered: checking it registers this one instead
+		if (!SetRegisteredAtLogon(!IsRegisteredAtLogon(exePath_), exePath_, error))
+		{
+			ReportError(text::StartWithWindows, error);
+		}
+	}
+
+	// Once a day at most, a child "AppTray.exe --check-update" asks GitHub for the latest release
+	void TrayApp::CheckForUpdates()
+	{
+		constexpr std::int64_t DaySeconds = 24 * 60 * 60;
+		if (!settings_.checkForUpdates || updateChecking_ || exiting_ || GetTickCount64() < nextUpdateCheck_)
+		{
+			return;
+		}
+		nextUpdateCheck_ = GetTickCount64() + DaySeconds * 1000;
+		// A check done in the last day (by this or an earlier run) is enough until it is a day old
+		const std::optional<UpdateState> state = LoadUpdateState(paths_.dataDirectory / L"update.json");
+		const std::optional<std::int64_t> checked = state ? ParseUtcSeconds(state->checkedAt) : std::nullopt;
+		const std::optional<std::int64_t> now = ParseUtcSeconds(FormatUtcNow());
+		if (checked && now && *now >= *checked && *now - *checked < DaySeconds)
+		{
+			nextUpdateCheck_ = GetTickCount64() + static_cast<ULONGLONG>(DaySeconds - (*now - *checked)) * 1000;
+			ApplyUpdateState();
+			return;
+		}
+		const std::wstring arguments = L"--check-update --data " + QuoteArgument(paths_.dataDirectory.wstring());
+		updateChecking_ = StartChildProcess(arguments, WM_APP_UPDATE_DONE, updateThread_);
+	}
+
+	void TrayApp::OnUpdateCheckDone(DWORD exitCode)
+	{
+		updateChecking_ = false;
+		if (updateThread_.joinable())
+		{
+			updateThread_.join();
+		}
+		if (!exiting_ && (exitCode == 0 || exitCode == static_cast<DWORD>(ExitCodeUpdateAvailable)))
+		{
+			ApplyUpdateState();
+		}
+		else
+		{
+			// Offline or GitHub unreachable: try again in an hour rather than tomorrow
+			constexpr ULONGLONG Hour = 60ULL * 60 * 1000;
+			nextUpdateCheck_ = GetTickCount64() + Hour;
+		}
+	}
+
+	// Reads update.json: a newer version adds a menu entry, and is announced once
+	void TrayApp::ApplyUpdateState()
+	{
+		const fs::path file = paths_.dataDirectory / L"update.json";
+		std::optional<UpdateState> state = LoadUpdateState(file);
+		if (!state || state->latestVersion.empty() || CompareVersions(state->latestVersion, APPTRAY_VERSION_WIDE) <= 0)
+		{
+			newRelease_.reset();
+			return;
+		}
+		newRelease_ = ReleaseInfo{state->latestVersion, state->url};
+		if (state->notifiedVersion != state->latestVersion)
+		{
+			trayIcon_.ShowNotification(
+				text::NewVersionTitle, std::format(text::NewVersionText, state->latestVersion, APPTRAY_VERSION_WIDE), false);
+			state->notifiedVersion = state->latestVersion;
+			std::wstring error;
+			SaveUpdateState(file, *state, error);
+		}
 	}
 
 	TrayApp::MenuScope::MenuScope(TrayApp& app)
@@ -524,6 +851,12 @@ namespace apptray
 			const DWORD exitCode = *pendingScanExit_;
 			pendingScanExit_.reset();
 			OnScanDone(exitCode);
+		}
+		if (menuDepth_ == 0 && pendingTaskExit_)
+		{
+			const DWORD exitCode = *pendingTaskExit_;
+			pendingTaskExit_.reset();
+			OnElevatedTaskDone(exitCode);
 		}
 	}
 
@@ -639,6 +972,7 @@ namespace apptray
 	void TrayApp::ShowLauncher()
 	{
 		ReloadSettingsIfChanged();
+		CheckForUpdates(); // at most once a day
 		launcher_.Show(ChooseLauncherAnchor(trayIcon_.GetRect()));
 	}
 
@@ -723,9 +1057,16 @@ namespace apptray
 	void TrayApp::ShowTrayMenu(POINT point)
 	{
 		ReloadSettingsIfChanged();
+		CheckForUpdates(); // at most once a day
 		const MenuScope menuScope = EnterMenu(); // items stay put until the command has run
 		categoryMenus_.clear();
 		HMENU menu = CreatePopupMenu();
+		if (newRelease_)
+		{
+			const std::wstring label = std::format(text::NewVersionMenu, newRelease_->version);
+			AppendMenuW(menu, MF_STRING, NewVersionCommand, label.c_str());
+			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		}
 		AppendMenuW(menu, MF_STRING, OpenLauncherCommand, text::OpenLauncher);
 		SetMenuDefaultItem(menu, OpenLauncherCommand, FALSE);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -761,6 +1102,7 @@ namespace apptray
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING | (scanning_ ? MF_GRAYED : 0), RefreshCommand, scanning_ ? text::Refreshing : text::Refresh);
 		AppendMenuW(menu, MF_STRING, SettingsCommand, text::EditSettings);
+		AppendMenuW(menu, MF_STRING | (IsRegisteredAtLogon(exePath_) ? MF_CHECKED : 0), StartWithWindowsCommand, text::StartWithWindows);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, ExitCommand, text::Exit);
 
@@ -783,6 +1125,15 @@ namespace apptray
 		case RefreshCommand:
 			StartRefresh();
 			break;
+		case StartWithWindowsCommand:
+			ToggleStartWithWindows();
+			break;
+		case NewVersionCommand:
+			if (newRelease_ && !newRelease_->url.empty())
+			{
+				OpenWithShell(newRelease_->url);
+			}
+			break;
 		case SettingsCommand:
 			OpenSettingsFile();
 			break;
@@ -798,7 +1149,7 @@ namespace apptray
 		}
 	}
 
-	int TrayApp::Run(bool showLauncher)
+	int TrayApp::Run(bool showLauncher, bool atLogon)
 	{
 		WNDCLASSEXW windowClass{};
 		windowClass.cbSize = sizeof(windowClass);
@@ -821,8 +1172,14 @@ namespace apptray
 		ChangeWindowMessageFilterEx(window_, taskbarCreatedMessage_, MSGFLT_ALLOW, nullptr);
 		LoadIconMetric(instance_, MAKEINTRESOURCEW(IDI_APPTRAY), LIM_SMALL, &trayIconHandle_);
 		Theme::ApplyMenuMode(Theme::IsSystemDark());
-		trayIcon_.Add(window_, WM_APP_TRAY, trayIconHandle_, text::AppName);
+		trayIcon_.Add(window_, WM_APP_TRAY, trayIconHandle_, text::AppName, GetTrayIconGuid(paths_.instanceName));
 		UpdateTip();
+		RepairLogonRegistration(exePath_); // the folder may have moved since it was registered
+		if (atLogon)
+		{
+			SetTimer(window_, LogonTimerId, static_cast<UINT>(std::max(0, settings_.startupDelaySeconds)) * 1000, nullptr);
+		}
+		SetTimer(window_, UpdateTimerId, UpdateCheckDelayMilliseconds, nullptr);
 		WriteLog(std::format(L"started: root {}, {} apps", root_.wstring(), catalog_.apps.size()));
 
 		if (!hasCatalog_)
@@ -871,7 +1228,7 @@ namespace apptray
 		if (message == taskbarCreatedMessage_ && taskbarCreatedMessage_ != 0)
 		{
 			// Explorer restarted: the icon must be added again
-			trayIcon_.Add(window_, WM_APP_TRAY, trayIconHandle_, text::AppName);
+			trayIcon_.Add(window_, WM_APP_TRAY, trayIconHandle_, text::AppName, GetTrayIconGuid(paths_.instanceName));
 			UpdateTip();
 			return 0;
 		}
@@ -893,6 +1250,28 @@ namespace apptray
 			return 0;
 		case WM_APP_SCAN_DONE:
 			OnScanDone(static_cast<DWORD>(wParam));
+			return 0;
+		case WM_APP_UPDATE_DONE:
+			OnUpdateCheckDone(static_cast<DWORD>(wParam));
+			return 0;
+		case WM_APP_TASK_DONE:
+			OnElevatedTaskDone(static_cast<DWORD>(wParam));
+			return 0;
+		case WM_TIMER:
+			// One-shot timers: nothing ticks while AppTray sits idle
+			KillTimer(window_, wParam);
+			if (wParam == LogonTimerId && menuDepth_ > 0)
+			{
+				SetTimer(window_, LogonTimerId, 2000, nullptr); // a menu holds the items: after it
+			}
+			else if (wParam == LogonTimerId)
+			{
+				RunLogonApps();
+			}
+			else if (wParam == UpdateTimerId)
+			{
+				CheckForUpdates();
+			}
 			return 0;
 		case WM_APP_SHOW:
 			ShowLauncher();

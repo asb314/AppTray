@@ -11,6 +11,7 @@ src/AppTray.Core/            static library, no UI: everything testable
 src/AppTray/                 the program (Windows subsystem): tray icon, launcher, menus
 tests/AppTray.Core.Tests/    GoogleTest unit tests for AppTray.Core
 tools/Deploy-AppTray.ps1     build + test + install into a folder (closes a running copy)
+tools/New-Release.ps1        build + test + zip (+ SHA-256); -Publish tags and creates the GitHub release
 tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 ```
 
@@ -18,13 +19,14 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 
 | File | Responsibility |
 |---|---|
-| `main.cpp` | Entry point: `--scan` (console output), single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
-| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes), tray menu (category submenus filled on `WM_INITMENUPOPUP`), background refresh, actions on apps |
+| `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
+| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes), tray menu (category submenus filled on `WM_INITMENUPOPUP`), background refresh, actions on apps, logon apps, Start with Windows, daily update check |
+| `StartupPrompt` | The logon dialog: "ask" apps as a check-box list view with a countdown (Abrir / Ninguna) |
 | `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`), app search over an owner-data list view (scoped to the chosen folder); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
-| `TrayIcon` | `Shell_NotifyIcon` v4: add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
+| `TrayIcon` | `Shell_NotifyIcon` v4 with a GUID (falls back to a plain id if refused): add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
-| `UiCommon` | Window messages, DPI helpers, system font |
+| `UiCommon` | Window messages, DPI helpers, system font, instance name and the tray icon GUID derived from it |
 | `Strings.h` | All user-facing texts (Spanish) |
 
 Memory: the launcher window, its image list, fonts and icon thread exist only while it is open.
@@ -44,6 +46,20 @@ Scanning in parallel: the root's folders are independent subtrees, scanned by up
 and merged in folder order (same result as a sequential scan). A cold scan is mostly waiting
 for the antivirus to clear each executable opened, and those waits overlap.
 
+Other child processes, same mechanism (`StartChildProcess`): `--check-update` at most once a day
+(exit 10 = newer release; the result is read from `data\update.json`, a failure retries in an
+hour). Creating or deleting an elevated task runs `AppTray.exe --register-task <id>` with
+`runas` instead (one UAC prompt); `elevatedTask` is written to `user.json` only when that copy
+exits with 0.
+
+Logon (`--startup`, from the HKCU Run value): one-shot timers run `RunLogonApps` after
+`startupDelaySeconds` and the first update check after 60 s. `PlanAutostart` lists the
+"always" apps to open and the "ask" apps for `StartupPrompt`, skipping hidden, missing and
+running ones (`ProcessFinder`: every process image path, matched by file, or by folder prefix
+for folder and PortableApps apps). An app that needs administrator opens through its elevated
+task or not at all. The logon run holds a `MenuScope`, so a refresh cannot swap the items
+under the dialog.
+
 A finished refresh never replaces the items while a popup menu is open (`TrayApp::MenuScope`):
 its result waits until the menu's command has run. A `user.json` that does not parse is never
 overwritten: changes and refreshes are refused until it is fixed. `FolderScanner` also honours
@@ -62,8 +78,13 @@ a `std::stop_token` (used by callers that scan in-process).
 | `UserSettings` | `user.json` load/save (keeps unknown keys) |
 | `CatalogMerger` | Fresh scan + previous catalog + user data → new catalog |
 | `CatalogRefresher` | Scan + merge + save in one call, thread-safe (used by `--scan` and the tray's background refresh) |
-| `AppList` | Catalog + `user.json` → items the UI shows (overrides, favorites, hidden, new); filters, accent-insensitive search, category tree |
+| `AppList` | Catalog + `user.json` → items the UI shows (overrides, favorites, hidden, new, autostart); filters, accent-insensitive search, category tree, logon plan |
 | `AppLauncher` | `ShellExecuteEx` launch (normal or `runas`), open folder/document, reveal in Explorer |
+| `ElevatedTask` | Task Scheduler (COM) tasks in `\AppTray` (name = readable id + FNV-1a hash): run elevated on demand with the user's interactive token, no trigger; create (for the user passed with `--task-user`), delete, run only if its action still matches the app's exe and arguments |
+| `LogonRegistration` | The HKCU `Run` value `AppTray` (`"exe" --startup`): read, set, delete, repair when the exe moved |
+| `ProcessFinder` | Image paths of running processes (`QueryFullProcessImageName`, works for elevated ones) and the "is this app running" test |
+| `UpdateCheck` | Latest GitHub release over WinHTTP, version comparison, `update.json` |
+| `Version.h` | Version number and GitHub repository (also used by the `.rc` and `New-Release.ps1`) |
 | `PathResolver` | Absolute ↔ root-relative paths (`/` separators); root resolution |
 | `ScanReport` | Markdown report of a scan |
 | `JsonFile` | UTF-8 JSON read, atomic tab-indented write |
@@ -118,11 +139,13 @@ scripts, −10 other scripts, −30 per helper word (`plugin`, `cli`, `service`,
 - `catalog.json`: `root`, `scannedAt`, `baselineAt`, `apps[]` with `id`, `kind`, `name`,
 	`description`, `category`, `target`, `alternatives`, `readme`, `confidence`,
 	`requiresAdmin`, `console`, `alternate`, `missing`, `firstSeen`.
-- `user.json`: `root`, `startWithWindows`, `startupDelaySeconds`, `startupPromptSeconds`,
+- `user.json`: `root`, `startupDelaySeconds`, `startupPromptSeconds`, `checkForUpdates`,
 	`categoryDepth` (folder levels shown as categories in the launcher tree and the tray menu:
 	0 = all, 1 = top level only; deeper apps belong to the last level shown),
 	`scan{maxDepth, ignore, skipNames}`, `favorites[]`, `apps{id: {hidden, name, category,
-	target, args, expand, autostart, askDefault, elevatedTask}}`.
+	target, args, expand, autostart (no/always/ask), askDefault, elevatedTask}}`. Start with
+	Windows is the HKCU Run value itself, not a setting.
+- `update.json`: `checkedAt`, `latestVersion`, `url`, `notifiedVersion` (announced once).
 
 ## Dependencies
 

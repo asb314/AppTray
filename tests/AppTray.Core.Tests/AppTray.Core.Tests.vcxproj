@@ -55,6 +55,7 @@
 		<ClCompile Include="FolderScannerTests.cpp" />
 		<ClCompile Include="NameTokensTests.cpp" />
 		<ClCompile Include="PathResolverTests.cpp" />
+		<ClCompile Include="Phase3Tests.cpp" />
 		<ClCompile Include="TestMain.cpp" />
 	</ItemGroup>
 	<ItemGroup>

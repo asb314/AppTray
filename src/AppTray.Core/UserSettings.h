@@ -45,10 +45,10 @@ namespace apptray
 	struct UserSettings
 	{
 		std::optional<std::wstring> root; // relative to AppTray's folder or absolute; default ".."
-		bool startWithWindows = false;
 		int startupDelaySeconds = 30;
 		int startupPromptSeconds = 15;
 		int categoryDepth = 0; // levels of folders shown as categories: 0 = all, 1 = top level only
+		bool checkForUpdates = true; // once a day, ask GitHub whether a newer release exists
 		ScanSettings scan;
 		std::vector<std::wstring> favorites;
 		std::map<std::wstring, AppOverride> apps;
@@ -68,6 +68,9 @@ namespace apptray
 	void SetHidden(UserSettings& settings, const std::wstring& id, bool hidden);
 	void SetTargetOverride(UserSettings& settings, const std::wstring& id, std::optional<std::wstring> target);
 	void SetExpanded(UserSettings& settings, const std::wstring& id, bool expanded);
+	void SetAutostart(UserSettings& settings, const std::wstring& id, AutostartMode mode);
+	void SetAskDefault(UserSettings& settings, const std::wstring& id, bool checked);
+	void SetElevatedTask(UserSettings& settings, const std::wstring& id, bool enabled);
 
 	// A missing file gives the defaults (no error). A broken file gives the defaults and an error.
 	UserSettings LoadUserSettings(const std::filesystem::path& file, std::wstring& error);

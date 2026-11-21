@@ -1,13 +1,14 @@
 #pragma code_page(65001)
 
 #include "..\resource.h"
+#include "..\..\AppTray.Core\Version.h"
 #include <winres.h>
 
 IDI_APPTRAY ICON "AppTray.ico"
 
 VS_VERSION_INFO VERSIONINFO
-	FILEVERSION 0,2,0,0
-	PRODUCTVERSION 0,2,0,0
+	FILEVERSION APPTRAY_VERSION_MAJOR, APPTRAY_VERSION_MINOR, APPTRAY_VERSION_PATCH, 0
+	PRODUCTVERSION APPTRAY_VERSION_MAJOR, APPTRAY_VERSION_MINOR, APPTRAY_VERSION_PATCH, 0
 	FILEFLAGSMASK 0x3fL
 	FILEFLAGS 0x0L
 	FILEOS VOS_NT_WINDOWS32
@@ -20,12 +21,12 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName", "asb314"
 			VALUE "FileDescription", "AppTray - tray launcher for portable apps"
-			VALUE "FileVersion", "0.2.0"
+			VALUE "FileVersion", APPTRAY_VERSION_TEXT
 			VALUE "InternalName", "AppTray"
 			VALUE "LegalCopyright", "Copyright (c) 2026 asb314. MIT License."
 			VALUE "OriginalFilename", "AppTray.exe"
 			VALUE "ProductName", "AppTray"
-			VALUE "ProductVersion", "0.2.0"
+			VALUE "ProductVersion", APPTRAY_VERSION_TEXT
 		END
 	END
 	BLOCK "VarFileInfo"

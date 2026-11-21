@@ -11,6 +11,7 @@ namespace apptray
 	inline constexpr int ExitCodeScanFailed = 1;
 	inline constexpr int ExitCodeBadArguments = 2;
 	inline constexpr int ExitCodeRootMissing = 3;
+	inline constexpr int ExitCodeUpdateAvailable = 10; // --check-update found a newer release
 
 	struct CommandLineOptions
 	{
@@ -19,6 +20,10 @@ namespace apptray
 		bool show = false;                // open the launcher of the running instance
 		bool exit = false;                // close the running instance
 		bool verbose = false;             // log every folder and executable the scan touches
+		bool checkUpdate = false;         // ask GitHub for a newer release, write data\update.json
+		std::optional<std::wstring> registerTask;   // app id: create its elevated task (run elevated)
+		std::optional<std::wstring> unregisterTask; // app id: delete its elevated task (run elevated)
+		std::optional<std::wstring> taskUser;       // DOMAIN\user the elevated task runs for
 		std::optional<std::wstring> root; // scan root override
 		std::optional<std::wstring> data; // data folder override (catalog.json, user.json, log)
 		std::optional<std::wstring> report;

@@ -4,6 +4,7 @@
 
 #include <shellscalingapi.h>
 
+#include <cstdint>
 #include <format>
 #include <functional>
 
@@ -25,6 +26,18 @@ namespace apptray
 				L"AppTray-{:08x}-{:08x}{:08x}", info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow);
 		}
 		return std::format(L"AppTray-{:x}", std::hash<std::wstring>{}(ToLower(exeDirectory)));
+	}
+
+	GUID GetTrayIconGuid(const std::wstring& instanceName)
+	{
+		GUID guid{0x6f1c2e3a, 0x8b4d, 0x4c55, {}};
+		const std::uint64_t hash = std::hash<std::wstring>{}(instanceName);
+		for (int i = 0; i < 8; ++i)
+		{
+			guid.Data4[i] = static_cast<unsigned char>(hash >> (8 * i));
+		}
+		guid.Data4[0] = static_cast<unsigned char>((guid.Data4[0] & 0x3F) | 0x80); // RFC 4122 variant
+		return guid;
 	}
 
 	wil::unique_hfont CreateMessageFont(UINT dpi, int percent)
