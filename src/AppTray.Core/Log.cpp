@@ -55,7 +55,7 @@ namespace apptray
 			message));
 
 		wil::unique_hfile handle(CreateFileW(
-			logFile.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+			logFile.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
 		if (handle)
 		{
 			DWORD written = 0;

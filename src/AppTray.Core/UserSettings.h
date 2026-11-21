@@ -56,7 +56,17 @@ namespace apptray
 		bool IsFavorite(const std::wstring& id) const;
 		bool HasUserData(const std::wstring& id) const;
 		std::vector<std::wstring> ExpandedIds() const;
+
+		// Override of an id, ignoring case (ids are paths); nullptr if none
+		const AppOverride* FindOverride(const std::wstring& id) const;
+		bool IsExpanded(const std::wstring& id) const;
 	};
+
+	// Changes made from the UI. Overrides left empty are removed.
+	void ToggleFavorite(UserSettings& settings, const std::wstring& id);
+	void SetHidden(UserSettings& settings, const std::wstring& id, bool hidden);
+	void SetTargetOverride(UserSettings& settings, const std::wstring& id, std::optional<std::wstring> target);
+	void SetExpanded(UserSettings& settings, const std::wstring& id, bool expanded);
 
 	// A missing file gives the defaults (no error). A broken file gives the defaults and an error.
 	UserSettings LoadUserSettings(const std::filesystem::path& file, std::wstring& error);

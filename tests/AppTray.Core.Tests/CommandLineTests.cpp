@@ -1,5 +1,9 @@
 #include "CommandLine.h"
 
+#include <windows.h>
+
+#include <shellapi.h>
+
 #include <gtest/gtest.h>
 
 using namespace apptray;
@@ -25,6 +29,21 @@ TEST(CommandLine, Should_NotTakeAnOptionAsValue_When_ValueIsMissing)
 	EXPECT_TRUE(options.verbose);
 	ASSERT_EQ(options.errors.size(), 1u);
 	EXPECT_NE(options.errors[0].find(L"--report"), std::wstring::npos);
+}
+
+TEST(CommandLine, Should_QuoteArgumentsSoTheyParseBackUnchanged)
+{
+	for (const wchar_t* value : {L"D:\\", L"C:\\Program Files\\App\\", L"a\"b", L"plain", L"x\\\\\"y"})
+	{
+		const std::wstring line = L"app.exe " + QuoteArgument(value) + L" --next";
+		int count = 0;
+		LPWSTR* parsed = CommandLineToArgvW(line.c_str(), &count);
+		ASSERT_NE(parsed, nullptr);
+		ASSERT_EQ(count, 3) << line;
+		EXPECT_EQ(std::wstring(parsed[1]), value) << line;
+		EXPECT_EQ(std::wstring(parsed[2]), L"--next") << line;
+		LocalFree(parsed);
+	}
 }
 
 TEST(CommandLine, Should_ReportUnknownArgumentsAndTrailingOptionWithoutValue)

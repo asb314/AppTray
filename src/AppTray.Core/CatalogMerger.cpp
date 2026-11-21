@@ -1,5 +1,8 @@
 #include "CatalogMerger.h"
 
+#include "PathResolver.h"
+#include "StringUtil.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -19,6 +22,12 @@ namespace apptray
 		{
 			return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_EQUAL;
 		}
+
+		// Ids compared without case and slash style, like Windows paths
+		std::wstring MakeKey(const std::wstring& id)
+		{
+			return ToLower(NormalizeRelative(id));
+		}
 	}
 
 	Catalog MergeCatalog(
@@ -34,21 +43,54 @@ namespace apptray
 		catalog.baselineAt = previous && !previous->baselineAt.empty() ? previous->baselineAt : now;
 
 		std::unordered_map<std::wstring, const AppEntry*> known;
+		// Earliest firstSeen of the previous entries inside each folder (by their category)
+		std::unordered_map<std::wstring, std::wstring> firstSeenInside;
 		if (previous)
 		{
 			for (const AppEntry& entry : previous->apps)
 			{
-				known.emplace(entry.id, &entry);
+				known.emplace(MakeKey(entry.id), &entry);
+				std::wstring& earliest = firstSeenInside[MakeKey(entry.category)];
+				if (!entry.firstSeen.empty() && (earliest.empty() || entry.firstSeen < earliest))
+				{
+					earliest = entry.firstSeen;
+				}
 			}
 		}
 
 		std::unordered_set<std::wstring> found;
+		std::unordered_set<std::wstring> suites; // grouped suites in this scan
+		for (const AppEntry& entry : scanned)
+		{
+			if (entry.kind == AppKind::Suite)
+			{
+				suites.insert(MakeKey(entry.id));
+			}
+		}
 		for (AppEntry& entry : scanned)
 		{
-			const auto old = known.find(entry.id);
-			entry.firstSeen = old != known.end() && !old->second->firstSeen.empty() ? old->second->firstSeen : now;
+			const std::wstring key = MakeKey(entry.id);
+			std::wstring firstSeen;
+			if (const auto old = known.find(key); old != known.end())
+			{
+				firstSeen = old->second->firstSeen;
+			}
+			// Not new, just regrouped: the programs of a suite the user expanded inherit the
+			// suite's date, and a suite grouped again inherits its programs' earliest date.
+			// Anything else unknown is new, even inside a known folder.
+			else if (const auto parent = known.find(MakeKey(entry.category));
+					 parent != known.end() && settings.IsExpanded(entry.category))
+			{
+				firstSeen = parent->second->firstSeen;
+			}
+			else if (const auto inside = firstSeenInside.find(key);
+					 inside != firstSeenInside.end() && entry.kind == AppKind::Suite)
+			{
+				firstSeen = inside->second;
+			}
+			entry.firstSeen = firstSeen.empty() ? now : firstSeen;
 			entry.missing = false;
-			found.insert(entry.id);
+			found.insert(key);
 			catalog.apps.push_back(std::move(entry));
 		}
 
@@ -56,7 +98,10 @@ namespace apptray
 		{
 			for (const AppEntry& entry : previous->apps)
 			{
-				if (!found.contains(entry.id) && settings.HasUserData(entry.id))
+				// Gone on purpose, not missing: an expanded suite (its programs replace it), or the
+				// programs of a suite grouped again (the suite replaces them)
+				const bool regrouped = settings.IsExpanded(entry.id) || suites.contains(MakeKey(entry.category));
+				if (!found.contains(MakeKey(entry.id)) && !regrouped && settings.HasUserData(entry.id))
 				{
 					AppEntry kept = entry;
 					kept.missing = true;

@@ -2,8 +2,11 @@
 
 #include <windows.h>
 
+#include <cstdio>
 #include <cwctype>
 #include <format>
+
+#pragma comment(lib, "Normaliz.lib")
 
 namespace apptray
 {
@@ -117,5 +120,54 @@ namespace apptray
 			now.wHour,
 			now.wMinute,
 			now.wSecond);
+	}
+
+	std::optional<std::int64_t> ParseUtcSeconds(std::wstring_view iso)
+	{
+		const std::wstring text(iso);
+		int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+		if (swscanf_s(text.c_str(), L"%4d-%2d-%2dT%2d:%2d:%2dZ", &year, &month, &day, &hour, &minute, &second) != 6)
+		{
+			return std::nullopt;
+		}
+		SYSTEMTIME time{};
+		time.wYear = static_cast<WORD>(year);
+		time.wMonth = static_cast<WORD>(month);
+		time.wDay = static_cast<WORD>(day);
+		time.wHour = static_cast<WORD>(hour);
+		time.wMinute = static_cast<WORD>(minute);
+		time.wSecond = static_cast<WORD>(second);
+		FILETIME file{};
+		if (!SystemTimeToFileTime(&time, &file))
+		{
+			return std::nullopt;
+		}
+		const ULARGE_INTEGER ticks{{file.dwLowDateTime, file.dwHighDateTime}};
+		return static_cast<std::int64_t>(ticks.QuadPart / 10'000'000ULL);
+	}
+
+	std::wstring FoldForSearch(std::wstring_view text)
+	{
+		const std::wstring lower = ToLower(text);
+		if (lower.empty())
+		{
+			return {};
+		}
+		// Canonical decomposition splits "é" into "e" + combining accent, then the accents go
+		const int length = NormalizeString(NormalizationD, lower.c_str(), static_cast<int>(lower.size()), nullptr, 0);
+		if (length <= 0)
+		{
+			return lower;
+		}
+		std::wstring decomposed(static_cast<size_t>(length), L'\0');
+		const int written = NormalizeString(
+			NormalizationD, lower.c_str(), static_cast<int>(lower.size()), decomposed.data(), length);
+		if (written <= 0)
+		{
+			return lower;
+		}
+		decomposed.resize(static_cast<size_t>(written));
+		std::erase_if(decomposed, [](wchar_t c) { return c >= 0x0300 && c <= 0x036F; });
+		return decomposed;
 	}
 }

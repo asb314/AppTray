@@ -1,22 +1,26 @@
-// AppTray entry point. Phase 1: command-line scan only (--scan [--report file.md]).
-// The tray icon and the launcher window arrive in phase 2.
+// AppTray entry point: the tray program, or a command-line scan with --scan.
 
 #include "Catalog.h"
-#include "CatalogMerger.h"
+#include "CatalogRefresher.h"
 #include "CommandLine.h"
-#include "FolderScanner.h"
 #include "Log.h"
 #include "PathResolver.h"
 #include "ScanReport.h"
 #include "StringUtil.h"
+#include "TrayApp.h"
+#include "UiCommon.h"
 #include "UserSettings.h"
 
 #include <windows.h>
+
+#include <commctrl.h>
+#include <objbase.h>
 
 #include <wil/resource.h>
 
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -111,7 +115,7 @@ namespace
 		{
 			MessageBoxW(nullptr, text.c_str(), L"AppTray", MB_OK | MB_ICONWARNING);
 		}
-		return 2;
+		return ExitCodeBadArguments;
 	}
 
 	int RunScan(const CommandLineOptions& options, const fs::path& exeDirectory, const fs::path& dataDirectory)
@@ -127,73 +131,89 @@ namespace
 		const fs::path settingsFile = dataDirectory / L"user.json";
 		std::error_code existsError;
 		const bool hadSettings = fs::exists(settingsFile, existsError);
-		UserSettings settings = LoadUserSettings(settingsFile, error);
+
+		RefreshRequest request;
+		request.settings = LoadUserSettings(settingsFile, error);
 		if (!error.empty())
 		{
 			report(L"user.json: " + error + L" (using defaults)");
 		}
-
-		const fs::path root = PathResolver::ResolveRoot(options.root, settings.root, exeDirectory);
-		ScanOptions scanOptions;
-		scanOptions.root = root;
-		scanOptions.maxDepth = settings.scan.maxDepth;
-		scanOptions.ignorePaths = settings.scan.ignore;
-		scanOptions.skipNames = settings.scan.skipNames;
-		scanOptions.expandIds = settings.ExpandedIds();
-		scanOptions.selfDirectory = exeDirectory;
+		request.root = PathResolver::ResolveRoot(options.root, request.settings.root, exeDirectory);
+		request.catalogFile = dataDirectory / L"catalog.json";
+		request.selfDirectory = exeDirectory;
 		if (options.verbose)
 		{
-			scanOptions.progress = [](std::wstring_view step) { WriteLog(step); };
+			request.progress = [](std::wstring_view step) { WriteLog(step); };
 		}
-		ScanResult scan = ScanFolders(scanOptions);
-		if (!scan.rootFound)
-		{
-			// Never replace a catalog with an empty one because a drive is unplugged
-			report(std::format(L"AppTray: cannot read {} (catalog left as it was)", root.wstring()));
-			return 1;
-		}
-
-		const fs::path catalogFile = dataDirectory / L"catalog.json";
-		std::optional<Catalog> previous;
-		if (fs::exists(catalogFile, existsError))
+		if (fs::exists(request.catalogFile, existsError))
 		{
 			std::wstring catalogError;
-			previous = LoadCatalog(catalogFile, catalogError);
-			if (!previous)
+			request.previous = LoadCatalog(request.catalogFile, catalogError);
+			if (!request.previous)
 			{
 				report(L"catalog.json: " + catalogError + L" (starting a new catalog)");
 			}
 		}
 
-		const Catalog catalog = MergeCatalog(std::move(scan.apps), previous, settings, root.wstring(), FormatUtcNow());
+		const RefreshOutcome outcome = RefreshCatalog(request);
+		if (!outcome.rootFound)
+		{
+			// Never replace a catalog with an empty one because a drive is unplugged
+			report(std::format(L"AppTray: cannot read {} (catalog left as it was)", request.root.wstring()));
+			return ExitCodeRootMissing;
+		}
+		if (!outcome.saved)
+		{
+			report(outcome.error);
+			return ExitCodeScanFailed;
+		}
 		std::wstring saveError;
-		if (!SaveCatalog(catalogFile, catalog, saveError))
-		{
-			report(saveError);
-			return 1;
-		}
-		if (!hadSettings && error.empty() && !SaveUserSettings(settingsFile, settings, saveError))
+		if (!hadSettings && error.empty() && !SaveUserSettings(settingsFile, request.settings, saveError))
 		{
 			report(saveError);
 		}
-		if (options.report && !WriteScanReport(fs::absolute(*options.report), catalog, scan, saveError))
+		if (options.report && !WriteScanReport(fs::absolute(*options.report), outcome.catalog, outcome.scan, saveError))
 		{
 			report(saveError);
-			return 1;
+			return ExitCodeScanFailed;
 		}
 
 		report(std::format(
 			L"AppTray: {} apps in {} ms ({} folders, {} executables inspected) -> {}",
-			catalog.apps.size(),
-			scan.elapsedMilliseconds,
-			scan.foldersVisited,
-			scan.executablesInspected,
-			catalogFile.wstring()));
+			outcome.catalog.apps.size(),
+			outcome.scan.elapsedMilliseconds,
+			outcome.scan.foldersVisited,
+			outcome.scan.executablesInspected,
+			request.catalogFile.wstring()));
 		return 0;
+	}
+
+	// One tray icon per AppTray folder. A second start forwards --show / --exit to the copy of
+	// the same folder (its hidden window is titled with the instance name), waiting a little if
+	// that copy is still loading its catalog.
+	void ForwardToRunningInstance(const CommandLineOptions& options, const std::wstring& instanceName)
+	{
+		HWND running = nullptr;
+		for (int attempt = 0; attempt < 30 && running == nullptr; ++attempt)
+		{
+			running = FindWindowW(TrayWindowClass, instanceName.c_str());
+			if (running == nullptr)
+			{
+				Sleep(100);
+			}
+		}
+		if (running == nullptr)
+		{
+			return;
+		}
+		DWORD processId = 0;
+		GetWindowThreadProcessId(running, &processId);
+		AllowSetForegroundWindow(processId); // so the running instance can bring its flyout up
+		PostMessageW(running, options.exit ? WM_APP_EXIT : WM_APP_SHOW, 0, 0);
 	}
 }
 
-int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
+int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 {
 	const CommandLineOptions options = ParseCommandLine(GetProcessArguments());
 	if (!options.errors.empty())
@@ -209,10 +229,34 @@ int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 		return RunScan(options, exeDirectory, dataDirectory);
 	}
 
-	MessageBoxW(
-		nullptr,
-		L"La bandeja llega en la fase 2.\n\nPor ahora: AppTray.exe --scan [--report informe.md]",
-		L"AppTray",
-		MB_OK | MB_ICONINFORMATION);
-	return 0;
+	const std::wstring instanceName = GetInstanceName(exeDirectory.wstring());
+	wil::unique_mutex_nothrow instanceMutex(CreateMutexW(nullptr, FALSE, (L"Local\\" + instanceName).c_str()));
+	const DWORD mutexError = GetLastError();
+	// ACCESS_DENIED: the running copy is elevated, so its mutex cannot be opened from here
+	if (mutexError == ERROR_ALREADY_EXISTS || (!instanceMutex && mutexError == ERROR_ACCESS_DENIED))
+	{
+		ForwardToRunningInstance(options, instanceName);
+		return 0;
+	}
+	if (options.exit)
+	{
+		return 0; // nothing to close
+	}
+
+	const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+	INITCOMMONCONTROLSEX controls{};
+	controls.dwSize = sizeof(controls);
+	controls.dwICC = ICC_STANDARD_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES;
+	InitCommonControlsEx(&controls);
+
+	int exitCode = 0;
+	{
+		TrayApp app(instance, {exeDirectory, dataDirectory, options.root, instanceName});
+		exitCode = app.Run(options.show);
+	}
+	if (SUCCEEDED(com))
+	{
+		CoUninitialize();
+	}
+	return exitCode;
 }

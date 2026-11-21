@@ -10,7 +10,10 @@
 #include <wil/resource.h>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
 #include <format>
+#include <thread>
 #include <unordered_map>
 
 namespace fs = std::filesystem;
@@ -61,6 +64,7 @@ namespace apptray
 		constexpr int MatchThreshold = 40;
 		constexpr int InspectLimit = 4;   // executables opened per app folder, best ranked first
 		constexpr int InspectMargin = 30; // ... and only those within this many points of the best
+		constexpr size_t ParallelFolders = 8; // top-level folders scanned at the same time
 
 		template <size_t N>
 		bool IsOneOfIgnoreCase(std::wstring_view text, const std::wstring_view (&words)[N])
@@ -246,19 +250,6 @@ namespace apptray
 			return {};
 		}
 
-		std::wstring NormalizeRelative(std::wstring text)
-		{
-			std::replace(text.begin(), text.end(), L'\\', L'/');
-			while (!text.empty() && text.back() == L'/')
-			{
-				text.pop_back();
-			}
-			while (!text.empty() && text.front() == L'/')
-			{
-				text.erase(text.begin());
-			}
-			return text;
-		}
 
 		std::wstring ReadIniString(const fs::path& file, const wchar_t* section, const wchar_t* key)
 		{
@@ -295,13 +286,122 @@ namespace apptray
 				result_.rootFound = fs::is_directory(resolver_.Root(), error) && ListDirectory(resolver_.Root()).found;
 				if (result_.rootFound)
 				{
-					result_.apps = Evaluate(resolver_.Root(), 0);
+					result_.apps = EvaluateRoot();
 				}
+				result_.cancelled = IsStopRequested();
 				result_.elapsedMilliseconds = GetTickCount64() - start;
 				return std::move(result_);
 			}
 
 		private:
+			// The root is always a category. Its folders are independent subtrees, scanned in
+			// parallel: most of a cold scan is spent waiting for the antivirus to clear each
+			// executable AppTray opens, and those waits overlap well. Results are merged in folder
+			// order, so the outcome is the same as a sequential scan.
+			std::vector<AppEntry> EvaluateRoot()
+			{
+				const fs::path& root = resolver_.Root();
+				++result_.foldersVisited;
+				if (options_.progress)
+				{
+					options_.progress(L"folder " + root.wstring());
+				}
+				const DirectoryListing listing = ListDirectory(root);
+				// Same order as Evaluate: loose programs, loose installers, then the subfolders
+				std::vector<AppEntry> entries;
+				for (const bool installers : {false, true})
+				{
+					for (const FileItem& file : listing.files)
+					{
+						if (IsLaunchable(file.name) && IsInstallerName(file.name) == installers)
+						{
+							entries.push_back(MakeFileEntry(root, file, installers));
+						}
+					}
+				}
+				if (options_.maxDepth < 1)
+				{
+					return entries;
+				}
+
+				std::vector<fs::path> folders;
+				for (const std::wstring& sub : listing.directories)
+				{
+					if (!IsSkipped(root / sub, sub))
+					{
+						folders.push_back(root / sub);
+					}
+				}
+				std::vector<std::vector<AppEntry>> appsByFolder(folders.size());
+				std::vector<ScanResult> partials(folders.size());
+				std::vector<std::exception_ptr> failures(folders.size());
+				std::atomic<size_t> next = 0;
+				const size_t workerCount = std::min(ParallelFolders, folders.size());
+				{
+					std::vector<std::jthread> workers;
+					for (size_t w = 0; w < workerCount; ++w)
+					{
+						workers.emplace_back(
+							[&]
+							{
+								for (size_t i = next++; i < folders.size(); i = next++)
+								{
+									try
+									{
+										Scanner child(options_);
+										appsByFolder[i] = child.Evaluate(folders[i], 1);
+										partials[i] = std::move(child.result_);
+									}
+									catch (...)
+									{
+										failures[i] = std::current_exception();
+									}
+								}
+							});
+					}
+				} // joined here
+
+				// Grouped like Evaluate does: other apps, then layout folders, then helper folders
+				std::vector<AppEntry> childApps;
+				std::vector<AppEntry> layoutApps;
+				std::vector<AppEntry> helperApps;
+				for (size_t i = 0; i < folders.size(); ++i)
+				{
+					if (failures[i])
+					{
+						std::rethrow_exception(failures[i]);
+					}
+					const std::wstring name = folders[i].filename().wstring();
+					const bool isSingleApp = appsByFolder[i].size() == 1
+						&& EqualsIgnoreCase(appsByFolder[i].front().id, MakeRelative(folders[i]));
+					if (isSingleApp && IsLayoutName(name))
+					{
+						AppendEntries(layoutApps, std::move(appsByFolder[i]));
+					}
+					else if (isSingleApp && IsHelperName(name))
+					{
+						AppendEntries(helperApps, std::move(appsByFolder[i]));
+					}
+					else
+					{
+						AppendEntries(childApps, std::move(appsByFolder[i]));
+					}
+					result_.foldersVisited += partials[i].foldersVisited;
+					result_.executablesInspected += partials[i].executablesInspected;
+					result_.skippedFolders.insert(
+						result_.skippedFolders.end(), partials[i].skippedFolders.begin(), partials[i].skippedFolders.end());
+				}
+				AppendEntries(entries, std::move(childApps));
+				AppendEntries(entries, std::move(layoutApps));
+				AppendEntries(entries, std::move(helperApps));
+				return entries;
+			}
+
+			bool IsStopRequested() const
+			{
+				return options_.stop.stop_requested();
+			}
+
 			std::wstring MakeRelative(const fs::path& path) const
 			{
 				return resolver_.ToRelative(path).value_or(path.wstring());
@@ -408,6 +508,10 @@ namespace apptray
 				std::vector<Candidate>& programs,
 				std::vector<Candidate>& installers)
 			{
+				if (IsStopRequested())
+				{
+					return;
+				}
 				const DirectoryListing listing = ListDirectory(directory);
 				for (const FileItem& file : listing.files)
 				{
@@ -703,6 +807,10 @@ namespace apptray
 
 			std::vector<AppEntry> Evaluate(const fs::path& directory, int depth)
 			{
+				if (IsStopRequested())
+				{
+					return {};
+				}
 				++result_.foldersVisited;
 				if (options_.progress)
 				{

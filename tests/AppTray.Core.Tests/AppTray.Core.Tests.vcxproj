@@ -47,6 +47,7 @@
 		<ClInclude Include="TestTree.h" />
 	</ItemGroup>
 	<ItemGroup>
+		<ClCompile Include="AppListTests.cpp" />
 		<ClCompile Include="CatalogTests.cpp" />
 		<ClCompile Include="CommandLineTests.cpp" />
 		<ClCompile Include="ExeInspectorTests.cpp" />

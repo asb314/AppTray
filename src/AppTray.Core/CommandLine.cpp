@@ -87,4 +87,25 @@ namespace apptray
 	{
 		return L"AppTray.exe [--scan [--report file.md] [--verbose]] [--root folder] [--data folder]";
 	}
+
+	std::wstring QuoteArgument(std::wstring_view argument)
+	{
+		std::wstring quoted = L"\"";
+		size_t backslashes = 0;
+		for (const wchar_t c : argument)
+		{
+			if (c == L'\\')
+			{
+				++backslashes;
+				continue;
+			}
+			// Backslashes are literal unless a quote follows: then each must be doubled
+			quoted.append(c == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
+			backslashes = 0;
+			quoted.push_back(c);
+		}
+		quoted.append(backslashes * 2, L'\\'); // before the closing quote
+		quoted.push_back(L'"');
+		return quoted;
+	}
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -20,4 +22,10 @@ namespace apptray
 
 	// Current UTC time as ISO 8601 without fractions: "2026-11-21T12:34:56Z"
 	std::wstring FormatUtcNow();
+
+	// Seconds since 1601-01-01 UTC for "2026-11-21T12:34:56Z"; nullopt when malformed
+	std::optional<std::int64_t> ParseUtcSeconds(std::wstring_view iso);
+
+	// Lowercase without accents, for searching: "Música Ñandú" -> "musica nandu"
+	std::wstring FoldForSearch(std::wstring_view text);
 }

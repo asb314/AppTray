@@ -36,6 +36,13 @@ namespace apptray
 		std::filesystem::path root_;
 	};
 
+	// The form ids are compared in: '/' separators, no leading or trailing slash
+	// ("Media\Tools\" -> "Media/Tools"). Comparisons still ignore case.
+	std::wstring NormalizeRelative(std::wstring_view relative);
+
+	// Same app id, written either way
+	bool IsSameRelative(std::wstring_view a, std::wstring_view b);
+
 	// Parent part of a relative path: "Media/Tools/ffmpeg" -> "Media/Tools", "ffmpeg" -> ""
 	std::wstring GetParentOfRelative(std::wstring_view relative);
 

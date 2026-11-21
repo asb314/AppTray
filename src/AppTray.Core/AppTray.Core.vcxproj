@@ -41,8 +41,11 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<ClInclude Include="AppEntry.h" />
+		<ClInclude Include="AppLauncher.h" />
+		<ClInclude Include="AppList.h" />
 		<ClInclude Include="Catalog.h" />
 		<ClInclude Include="CatalogMerger.h" />
+		<ClInclude Include="CatalogRefresher.h" />
 		<ClInclude Include="CommandLine.h" />
 		<ClInclude Include="ExeInspector.h" />
 		<ClInclude Include="ExeRanker.h" />
@@ -57,8 +60,11 @@
 	</ItemGroup>
 	<ItemGroup>
 		<ClCompile Include="AppEntry.cpp" />
+		<ClCompile Include="AppLauncher.cpp" />
+		<ClCompile Include="AppList.cpp" />
 		<ClCompile Include="Catalog.cpp" />
 		<ClCompile Include="CatalogMerger.cpp" />
+		<ClCompile Include="CatalogRefresher.cpp" />
 		<ClCompile Include="CommandLine.cpp" />
 		<ClCompile Include="ExeInspector.cpp" />
 		<ClCompile Include="ExeRanker.cpp" />

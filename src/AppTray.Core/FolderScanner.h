@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,6 +22,8 @@ namespace apptray
 		std::filesystem::path selfDirectory;   // AppTray's own folder, never scanned
 		// Called with every folder entered and every executable inspected (diagnostics)
 		std::function<void(std::wstring_view)> progress;
+		// Lets the tray program stop a scan when it exits
+		std::stop_token stop;
 	};
 
 	struct ScanResult
@@ -28,6 +31,7 @@ namespace apptray
 		// false when the root is missing or cannot be listed (unplugged drive, offline share):
 		// then apps is empty and must not replace an existing catalog
 		bool rootFound = false;
+		bool cancelled = false; // stopped early: apps is incomplete and must not be saved
 		std::vector<AppEntry> apps;
 		std::vector<std::wstring> skippedFolders; // relative paths left out by a rule (for the report)
 		int foldersVisited = 0;

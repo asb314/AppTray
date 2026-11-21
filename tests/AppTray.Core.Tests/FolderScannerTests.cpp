@@ -256,6 +256,22 @@ TEST(FolderScanner, Should_ReportRootNotFound_When_RootIsMissing)
 	EXPECT_TRUE(result.apps.empty());
 }
 
+TEST(FolderScanner, Should_StopEarly_When_StopIsRequested)
+{
+	TestTree tree;
+	tree.Add(L"Tools/Foo/Foo.exe");
+	std::stop_source stop;
+	stop.request_stop();
+
+	ScanOptions options;
+	options.stop = stop.get_token();
+	const ScanResult result = Scan(tree, options);
+
+	EXPECT_TRUE(result.rootFound);
+	EXPECT_TRUE(result.cancelled);
+	EXPECT_TRUE(result.apps.empty());
+}
+
 TEST(FolderScanner, Should_FindProgram_When_ItSitsDeepInLayoutFolders)
 {
 	TestTree tree;

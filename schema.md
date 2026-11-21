@@ -8,9 +8,46 @@ Directory.Build.props        makes every project use the vcpkg bundled with Visu
 vcpkg.json                   dependencies, manifest mode (triplet x64-windows-static)
 build/AppTray.Common.props   shared compiler/linker settings: C++20, /W4 /WX, static CRT, LTCG
 src/AppTray.Core/            static library, no UI: everything testable
-src/AppTray/                 the program (Windows subsystem): main.cpp, res/app.manifest
+src/AppTray/                 the program (Windows subsystem): tray icon, launcher, menus
 tests/AppTray.Core.Tests/    GoogleTest unit tests for AppTray.Core
+tools/Deploy-AppTray.ps1     build + test + install into a folder (closes a running copy)
+tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 ```
+
+## AppTray (UI)
+
+| File | Responsibility |
+|---|---|
+| `main.cpp` | Entry point: `--scan` (console output), single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
+| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes), tray menu (category submenus filled on `WM_INITMENUPOPUP`), background refresh, actions on apps |
+| `LauncherWindow` | The flyout: search box, category tree, owner-data list view; created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
+| `TrayIcon` | `Shell_NotifyIcon` v4: add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
+| `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
+| `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
+| `UiCommon` | Window messages, DPI helpers, system font |
+| `Strings.h` | All user-facing texts (Spanish) |
+
+Memory: the launcher window, its image list, fonts and icon thread exist only while it is open.
+After loading the catalog, after each refresh and when the launcher closes, the heap is
+compacted (`HeapCompact`): ~2.5 MB of private memory after start (6 MB without it), ~5 MB once
+the launcher has been used. Icons avoid `SHGetFileInfo` and `IShellLink` on purpose: both load
+the shell namespace, which left ~1.5 MB and four threads behind for good. Scripts get cmd.exe's
+icon, folders the stock folder icon, and `.lnk` files are read directly (MS-SHLLINK).
+
+Refresh: the tray never scans in its own process. It starts `AppTray.exe --scan --root ...
+--data ...` (below-normal priority) and waits for it on a thread; exit code 0 means
+catalog.json is new and is reloaded, 3 means the root is missing. The child's threads, heap
+and mapped files vanish with it, so the tray's memory does not grow with the tree. Exiting
+kills the child; catalog.json is written atomically, so that never leaves a broken file.
+
+Scanning in parallel: the root's folders are independent subtrees, scanned by up to 8 threads
+and merged in folder order (same result as a sequential scan). A cold scan is mostly waiting
+for the antivirus to clear each executable opened, and those waits overlap.
+
+A finished refresh never replaces the items while a popup menu is open (`TrayApp::MenuScope`):
+its result waits until the menu's command has run. A `user.json` that does not parse is never
+overwritten: changes and refreshes are refused until it is fixed. `FolderScanner` also honours
+a `std::stop_token` (used by callers that scan in-process).
 
 ## AppTray.Core
 
@@ -24,12 +61,15 @@ tests/AppTray.Core.Tests/    GoogleTest unit tests for AppTray.Core
 | `Catalog` | `catalog.json` load/save |
 | `UserSettings` | `user.json` load/save (keeps unknown keys) |
 | `CatalogMerger` | Fresh scan + previous catalog + user data → new catalog |
+| `CatalogRefresher` | Scan + merge + save in one call, thread-safe (used by `--scan` and the tray's background refresh) |
+| `AppList` | Catalog + `user.json` → items the UI shows (overrides, favorites, hidden, new); filters, accent-insensitive search, category tree |
+| `AppLauncher` | `ShellExecuteEx` launch (normal or `runas`), open folder/document, reveal in Explorer |
 | `PathResolver` | Absolute ↔ root-relative paths (`/` separators); root resolution |
 | `ScanReport` | Markdown report of a scan |
 | `JsonFile` | UTF-8 JSON read, atomic tab-indented write |
 | `CommandLine` | Argument parsing |
 | `Log` | Small rotating UTF-8 log |
-| `StringUtil` | UTF-8/UTF-16, case-insensitive comparisons, UTC timestamps |
+| `StringUtil` | UTF-8/UTF-16, case-insensitive comparisons, UTC timestamps, accent folding for search |
 
 ## Scanner rules
 

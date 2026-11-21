@@ -96,6 +96,24 @@ namespace apptray
 		return MakeCanonical(exeDirectory.parent_path());
 	}
 
+	std::wstring NormalizeRelative(std::wstring_view relative)
+	{
+		std::wstring text(relative);
+		std::replace(text.begin(), text.end(), L'\\', L'/');
+		const size_t first = text.find_first_not_of(L'/');
+		if (first == std::wstring::npos)
+		{
+			return {};
+		}
+		const size_t last = text.find_last_not_of(L'/');
+		return text.substr(first, last - first + 1);
+	}
+
+	bool IsSameRelative(std::wstring_view a, std::wstring_view b)
+	{
+		return EqualsIgnoreCase(NormalizeRelative(a), NormalizeRelative(b));
+	}
+
 	std::wstring GetParentOfRelative(std::wstring_view relative)
 	{
 		const size_t slash = relative.rfind(L'/');

@@ -1,5 +1,6 @@
 #include "UserSettings.h"
 
+#include "PathResolver.h"
 #include "StringUtil.h"
 
 #include <algorithm>
@@ -135,7 +136,7 @@ namespace apptray
 
 	bool UserSettings::IsFavorite(const std::wstring& id) const
 	{
-		return std::find(favorites.begin(), favorites.end(), id) != favorites.end();
+		return std::any_of(favorites.begin(), favorites.end(), [&](const std::wstring& f) { return IsSameRelative(f, id); });
 	}
 
 	bool UserSettings::HasUserData(const std::wstring& id) const
@@ -144,8 +145,8 @@ namespace apptray
 		{
 			return true;
 		}
-		const auto found = apps.find(id);
-		return found != apps.end() && !found->second.IsEmpty();
+		const AppOverride* item = FindOverride(id);
+		return item != nullptr && !item->IsEmpty();
 	}
 
 	std::vector<std::wstring> UserSettings::ExpandedIds() const
@@ -155,10 +156,81 @@ namespace apptray
 		{
 			if (item.expand)
 			{
-				ids.push_back(id);
+				ids.push_back(NormalizeRelative(id));
 			}
 		}
 		return ids;
+	}
+
+	const AppOverride* UserSettings::FindOverride(const std::wstring& id) const
+	{
+		for (const auto& [key, item] : apps)
+		{
+			if (IsSameRelative(key, id))
+			{
+				return &item;
+			}
+		}
+		return nullptr;
+	}
+
+	bool UserSettings::IsExpanded(const std::wstring& id) const
+	{
+		const AppOverride* item = FindOverride(id);
+		return item != nullptr && item->expand;
+	}
+
+	namespace
+	{
+		// Changes the override of an id, reusing a key the user wrote with other casing
+		template <typename Change> void ChangeOverride(UserSettings& settings, const std::wstring& id, Change change)
+		{
+			std::wstring key = id;
+			for (const auto& [existing, item] : settings.apps)
+			{
+				if (IsSameRelative(existing, id))
+				{
+					key = existing;
+					break;
+				}
+			}
+			AppOverride& item = settings.apps[key];
+			change(item);
+			if (item.IsEmpty())
+			{
+				// Keys the user added by hand to this entry survive: SaveUserSettings keeps them
+				settings.apps.erase(key);
+			}
+		}
+	}
+
+	void ToggleFavorite(UserSettings& settings, const std::wstring& id)
+	{
+		const auto found = std::find_if(
+			settings.favorites.begin(), settings.favorites.end(), [&](const std::wstring& f) { return IsSameRelative(f, id); });
+		if (found == settings.favorites.end())
+		{
+			settings.favorites.push_back(id);
+		}
+		else
+		{
+			settings.favorites.erase(found);
+		}
+	}
+
+	void SetHidden(UserSettings& settings, const std::wstring& id, bool hidden)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.hidden = hidden; });
+	}
+
+	void SetTargetOverride(UserSettings& settings, const std::wstring& id, std::optional<std::wstring> target)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.target = std::move(target); });
+	}
+
+	void SetExpanded(UserSettings& settings, const std::wstring& id, bool expanded)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.expand = expanded; });
 	}
 
 	UserSettings LoadUserSettings(const fs::path& file, std::wstring& error)
@@ -239,6 +311,19 @@ namespace apptray
 			if (!value.empty())
 			{
 				apps[key] = std::move(value);
+			}
+		}
+		// Entries whose known fields were all cleared still carry the keys the user added
+		for (const auto& [key, stored] : storedApps.items())
+		{
+			if (apps.contains(key) || !stored.is_object())
+			{
+				continue;
+			}
+			Json rest = SerializeOverride(AppOverride{}, stored);
+			if (!rest.empty())
+			{
+				apps[key] = std::move(rest);
 			}
 		}
 		json["apps"] = std::move(apps);
