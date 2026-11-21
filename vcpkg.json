@@ -1,0 +1,13 @@
+{
+	"$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+	"name": "apptray",
+	"version-string": "0.1.0",
+	"description": "Lightweight tray launcher for a folder tree of portable Windows apps",
+	"license": "MIT",
+	"builtin-baseline": "9967a8eb5f4f5cd7be2b6717d31ddb7ff84c4751",
+	"dependencies": [
+		"nlohmann-json",
+		"wil",
+		"gtest"
+	]
+}

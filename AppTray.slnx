@@ -1,0 +1,21 @@
+<Solution>
+	<Configurations>
+		<Platform Name="x64" />
+	</Configurations>
+	<Folder Name="/Solution Items/">
+		<File Path=".clang-format" />
+		<File Path=".editorconfig" />
+		<File Path="build/AppTray.Common.props" />
+		<File Path="LICENSE" />
+		<File Path="README.md" />
+		<File Path="schema.md" />
+		<File Path="vcpkg.json" />
+	</Folder>
+	<Folder Name="/src/">
+		<Project Path="src/AppTray.Core/AppTray.Core.vcxproj" Id="d141e90c-c60c-4274-8148-903445dec820" />
+		<Project Path="src/AppTray/AppTray.vcxproj" Id="0cba6fef-dcdb-4773-8d35-823267ca560e" />
+	</Folder>
+	<Folder Name="/tests/">
+		<Project Path="tests/AppTray.Core.Tests/AppTray.Core.Tests.vcxproj" Id="e47f24fe-8eb2-4eb4-b5d8-3af5070b95b8" />
+	</Folder>
+</Solution>

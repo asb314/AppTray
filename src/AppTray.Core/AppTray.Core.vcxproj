@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AppTray.Core: static library with everything that has no UI (scanner, catalog, settings) -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<ItemGroup Label="ProjectConfigurations">
+		<ProjectConfiguration Include="Debug|x64">
+			<Configuration>Debug</Configuration>
+			<Platform>x64</Platform>
+		</ProjectConfiguration>
+		<ProjectConfiguration Include="Release|x64">
+			<Configuration>Release</Configuration>
+			<Platform>x64</Platform>
+		</ProjectConfiguration>
+	</ItemGroup>
+	<PropertyGroup Label="Globals">
+		<VCProjectVersion>18.0</VCProjectVersion>
+		<ProjectGuid>{D141E90C-C60C-4274-8148-903445DEC820}</ProjectGuid>
+		<RootNamespace>AppTrayCore</RootNamespace>
+		<WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+	</PropertyGroup>
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+	<PropertyGroup Label="Configuration">
+		<ConfigurationType>StaticLibrary</ConfigurationType>
+		<PlatformToolset>v145</PlatformToolset>
+		<CharacterSet>Unicode</CharacterSet>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+		<UseDebugLibraries>true</UseDebugLibraries>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+		<UseDebugLibraries>false</UseDebugLibraries>
+		<WholeProgramOptimization>true</WholeProgramOptimization>
+	</PropertyGroup>
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+	<ImportGroup Label="PropertySheets">
+		<Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+		<Import Project="..\..\build\AppTray.Common.props" />
+	</ImportGroup>
+	<PropertyGroup Label="Vcpkg">
+		<!-- Only header-only packages are used here -->
+		<VcpkgAutoLink>false</VcpkgAutoLink>
+	</PropertyGroup>
+	<ItemGroup>
+		<ClInclude Include="AppEntry.h" />
+		<ClInclude Include="Catalog.h" />
+		<ClInclude Include="CatalogMerger.h" />
+		<ClInclude Include="CommandLine.h" />
+		<ClInclude Include="ExeInspector.h" />
+		<ClInclude Include="ExeRanker.h" />
+		<ClInclude Include="FolderScanner.h" />
+		<ClInclude Include="JsonFile.h" />
+		<ClInclude Include="Log.h" />
+		<ClInclude Include="NameTokens.h" />
+		<ClInclude Include="PathResolver.h" />
+		<ClInclude Include="ScanReport.h" />
+		<ClInclude Include="StringUtil.h" />
+		<ClInclude Include="UserSettings.h" />
+	</ItemGroup>
+	<ItemGroup>
+		<ClCompile Include="AppEntry.cpp" />
+		<ClCompile Include="Catalog.cpp" />
+		<ClCompile Include="CatalogMerger.cpp" />
+		<ClCompile Include="CommandLine.cpp" />
+		<ClCompile Include="ExeInspector.cpp" />
+		<ClCompile Include="ExeRanker.cpp" />
+		<ClCompile Include="FolderScanner.cpp" />
+		<ClCompile Include="JsonFile.cpp" />
+		<ClCompile Include="Log.cpp" />
+		<ClCompile Include="NameTokens.cpp" />
+		<ClCompile Include="PathResolver.cpp" />
+		<ClCompile Include="ScanReport.cpp" />
+		<ClCompile Include="StringUtil.cpp" />
+		<ClCompile Include="UserSettings.cpp" />
+	</ItemGroup>
+	<Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

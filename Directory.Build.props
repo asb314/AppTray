@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Imported by MSBuild before every project in this repo -->
+<Project>
+	<PropertyGroup>
+		<!-- Use the vcpkg bundled with Visual Studio (it knows the VS 2026 toolset), instead of
+			 whatever the user-wide integration (%LOCALAPPDATA%\vcpkg\vcpkg.user) points to.
+			 Set APPTRAY_VCPKG to the msbuild folder of another vcpkg to override. -->
+		<VCLibPackagePath Condition="'$(APPTRAY_VCPKG)' != ''">$(APPTRAY_VCPKG)\vcpkg</VCLibPackagePath>
+		<VCLibPackagePath Condition="'$(VCLibPackagePath)' == '' and Exists('$(VsInstallRoot)\VC\vcpkg\scripts\buildsystems\msbuild\vcpkg.props')">$(VsInstallRoot)\VC\vcpkg\scripts\buildsystems\msbuild\vcpkg</VCLibPackagePath>
+	</PropertyGroup>
+</Project>
