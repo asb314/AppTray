@@ -603,6 +603,11 @@ namespace apptray
 					entry.console = info.isConsole;
 					installer = info.looksLikeInstaller;
 					entry.requiresAdmin = !installer && IsElevationRequired(path);
+					entry.version = info.version;
+				}
+				if (entry.version.empty())
+				{
+					entry.version = FindVersionInName(StripLaunchExtension(file.name));
 				}
 				entry.kind = installer ? AppKind::Installer : AppKind::File;
 				return entry;
@@ -619,6 +624,11 @@ namespace apptray
 				entry.category = GetParentOfRelative(entry.id);
 				entry.target = MakeRelativeOf(installers.front());
 				entry.description = Describe(installers.front().info);
+				entry.version = installers.front().info.version;
+				if (entry.version.empty())
+				{
+					entry.version = FindVersionInName(name);
+				}
 				entry.confidence = installers.front().match;
 				entry.alternate = IsBackupName(name);
 				for (size_t i = 1; i < installers.size() && entry.alternatives.size() < AlternativeLimit; ++i)
@@ -707,6 +717,7 @@ namespace apptray
 					entry.kind = AppKind::Suite;
 					entry.confidence = programs.front().match;
 					entry.description = std::format(L"{} programs", topLevel);
+					entry.version = FindVersionInName(name);
 					for (const Candidate& candidate : programs)
 					{
 						if (candidate.depth == 0 && entry.alternatives.size() < AlternativeLimit)
@@ -727,6 +738,8 @@ namespace apptray
 				entry.confidence = best.match;
 				entry.target = MakeRelativeOf(best);
 				entry.description = Describe(best.info);
+				// Scripts have no version resource: the folder name often carries one
+				entry.version = best.info.version.empty() ? FindVersionInName(name) : best.info.version;
 				entry.requiresAdmin = IsElevationRequired(best.path);
 				entry.console = best.info.isConsole;
 				for (size_t i = 1; i < programs.size() && entry.alternatives.size() < AlternativeLimit; ++i)
@@ -787,15 +800,22 @@ namespace apptray
 				}
 
 				entry.description = ReadIniString(ini, L"Details", L"Description");
+				entry.version = NormalizeVersion(ReadIniString(ini, L"Version", L"DisplayVersion"));
 				entry.confidence = 100;
 				if (!target.empty())
 				{
 					entry.target = MakeRelative(target);
 					entry.requiresAdmin = IsElevationRequired(target);
-					if (entry.description.empty())
+					if (entry.description.empty() || entry.version.empty())
 					{
-						entry.description = Describe(Inspect(target));
+						const ExeInfo& info = Inspect(target);
+						entry.description = entry.description.empty() ? Describe(info) : entry.description;
+						entry.version = entry.version.empty() ? info.version : entry.version;
 					}
+				}
+				if (entry.version.empty())
+				{
+					entry.version = FindVersionInName(name);
 				}
 				const std::wstring readme = FindReadmeName(listing);
 				if (!readme.empty())

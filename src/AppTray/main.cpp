@@ -8,6 +8,7 @@
 #include "Log.h"
 #include "PathResolver.h"
 #include "ScanReport.h"
+#include "Shortcut.h"
 #include "StringUtil.h"
 #include "TrayApp.h"
 #include "UiCommon.h"
@@ -217,7 +218,8 @@ namespace
 	}
 
 	// --register-task / --unregister-task <id>: started elevated by the tray (one UAC prompt).
-	// Reads the catalog and user.json (never writes them) to find what the app launches.
+	// Reads the catalog and user.json (never writes them) to find what the app launches. Being
+	// elevated anyway, it also deletes the tasks left by apps whose folder is gone.
 	int RunTaskRegistration(const CommandLineOptions& options, const fs::path& exeDirectory, const fs::path& dataDirectory)
 	{
 		const bool registering = options.registerTask.has_value();
@@ -233,18 +235,19 @@ namespace
 		const std::vector<AppItem> items = BuildAppItems(*catalog, settings, FormatUtcNow());
 		const auto item = std::find_if(
 			items.begin(), items.end(), [&](const AppItem& candidate) { return IsSameRelative(candidate.entry->id, id); });
-		if (item == items.end())
+		// Deleting needs only the name: the app may be gone from the catalog
+		if (item == items.end() && registering)
 		{
 			WriteLog(L"elevated task: unknown app " + id);
 			return ExitCodeScanFailed;
 		}
 
 		const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-		const std::wstring taskName = MakeElevatedTaskName(item->entry->id);
+		const std::wstring taskName = MakeElevatedTaskName(item != items.end() ? item->entry->id : id);
+		const fs::path root = PathResolver::ResolveRoot(options.root, settings.root, exeDirectory);
 		bool done = false;
 		if (registering)
 		{
-			const fs::path root = PathResolver::ResolveRoot(options.root, settings.root, exeDirectory);
 			const std::optional<fs::path> target = PathResolver(root).ToAbsolute(item->target);
 			// The user of the AppTray that asked, not the account that approved the UAC prompt
 			const std::wstring user = options.taskUser.value_or(GetCurrentUserName());
@@ -254,12 +257,82 @@ namespace
 		{
 			done = DeleteElevatedTask(taskName, error);
 		}
+		std::wstring cleanupError;
+		for (const std::wstring& orphan : DeleteOrphanedElevatedTasks(root, cleanupError))
+		{
+			WriteLog(L"elevated task deleted (its program is gone): " + orphan);
+		}
 		if (SUCCEEDED(com))
 		{
 			CoUninitialize();
 		}
 		WriteLog(std::format(
 			L"elevated task {} {}: {}", registering ? L"created" : L"deleted", taskName, done ? L"ok" : error));
+		return done ? 0 : ExitCodeScanFailed;
+	}
+
+	// --create-shortcut <id> [--shortcut-in desktop|startmenu]: started by the tray, so that
+	// IShellLink and the shell namespace it loads go away with this process
+	int RunShortcutCreation(const CommandLineOptions& options, const fs::path& exeDirectory, const fs::path& dataDirectory)
+	{
+		const std::wstring& id = *options.createShortcut;
+		const std::optional<ShortcutPlace> place = ParseShortcutPlace(options.shortcutIn.value_or(L"desktop"));
+		if (!place)
+		{
+			WriteLog(L"shortcut: unknown place " + options.shortcutIn.value_or(L""));
+			return ExitCodeBadArguments;
+		}
+		std::wstring error;
+		const UserSettings settings = LoadUserSettings(dataDirectory / L"user.json", error);
+		const std::optional<Catalog> catalog = LoadCatalog(dataDirectory / L"catalog.json", error);
+		if (!catalog)
+		{
+			WriteLog(L"shortcut: " + error);
+			return ExitCodeScanFailed;
+		}
+		const std::vector<AppItem> items = BuildAppItems(*catalog, settings, FormatUtcNow());
+		const auto item = std::find_if(
+			items.begin(), items.end(), [&](const AppItem& candidate) { return IsSameRelative(candidate.entry->id, id); });
+		if (item == items.end())
+		{
+			WriteLog(L"shortcut: unknown app " + id);
+			return ExitCodeScanFailed;
+		}
+		const fs::path root = PathResolver::ResolveRoot(options.root, settings.root, exeDirectory);
+		// A suite has no target: the shortcut opens its folder
+		const bool isFolder = item->target.empty();
+		const std::optional<fs::path> target = PathResolver(root).ToAbsolute(isFolder ? item->entry->id : item->target);
+		if (!target)
+		{
+			WriteLog(L"shortcut: no target for " + id);
+			return ExitCodeScanFailed;
+		}
+
+		const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+		bool done = false;
+		ShortcutSpec spec;
+		const fs::path folder = GetShortcutFolder(*place, error);
+		spec.file = folder.empty() ? fs::path{} : ChooseShortcutFile(folder, MakeShortcutFileName(item->name), *target);
+		if (!folder.empty() && spec.file.empty())
+		{
+			error = L"no free shortcut name in " + folder.wstring();
+		}
+		if (!spec.file.empty())
+		{
+			spec.target = *target;
+			if (!isFolder)
+			{
+				spec.arguments = item->args;
+				spec.workingDirectory = target->parent_path(); // as AppTray starts it
+			}
+			spec.description = item->entry->description;
+			done = WriteShortcut(spec, error);
+		}
+		if (SUCCEEDED(com))
+		{
+			CoUninitialize();
+		}
+		WriteLog(done ? L"shortcut: " + spec.file.wstring() : L"shortcut failed: " + error);
 		return done ? 0 : ExitCodeScanFailed;
 	}
 
@@ -310,6 +383,10 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 	if (options.registerTask || options.unregisterTask)
 	{
 		return RunTaskRegistration(options, exeDirectory, dataDirectory);
+	}
+	if (options.createShortcut)
+	{
+		return RunShortcutCreation(options, exeDirectory, dataDirectory);
 	}
 
 	const std::wstring instanceName = GetInstanceName(exeDirectory.wstring());

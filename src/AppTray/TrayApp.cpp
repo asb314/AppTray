@@ -1,9 +1,12 @@
 #include "TrayApp.h"
 
 #include "AppLauncher.h"
+#include "CatalogMerger.h"
 #include "CommandLine.h"
 #include "ElevatedTask.h"
+#include "Hotkey.h"
 #include "IconLoader.h"
+#include "JsonFile.h"
 #include "Log.h"
 #include "LogonRegistration.h"
 #include "ProcessFinder.h"
@@ -43,6 +46,8 @@ namespace apptray
 		constexpr UINT_PTR LogonTimerId = 1;
 		constexpr UINT_PTR UpdateTimerId = 2;
 		constexpr UINT UpdateCheckDelayMilliseconds = 60 * 1000; // not while the logon apps start
+		constexpr int LauncherHotkeyId = 1;
+		constexpr size_t TrayRecentLimit = 5; // recent apps in the tray menu (not favorites)
 
 		// Parsing JSON and scanning leave freed blocks committed in the heap; give them back so
 		// the idle tray keeps a small footprint
@@ -156,6 +161,8 @@ namespace apptray
 	{
 		catalogFile_ = paths_.dataDirectory / L"catalog.json";
 		settingsFile_ = paths_.dataDirectory / L"user.json";
+		settingsBackupFile_ = paths_.dataDirectory / L"user.json.bak";
+		usageFile_ = paths_.dataDirectory / L"usage.json";
 		exePath_ = GetModulePath();
 		LoadData();
 		ReleaseFreeMemory();
@@ -193,6 +200,7 @@ namespace apptray
 		settingsWriteTime_ = GetWriteTime(settingsFile_);
 		root_ = PathResolver::ResolveRoot(paths_.rootOverride, settings_.root, paths_.exeDirectory);
 		rootIsRemote_ = GetDriveTypeW(root_.root_path().c_str()) == DRIVE_REMOTE;
+		usage_ = LoadUsageStats(usageFile_);
 
 		if (fs::exists(catalogFile_, existsError))
 		{
@@ -207,12 +215,93 @@ namespace apptray
 				WriteLog(L"catalog.json: " + catalogError);
 			}
 		}
+		if (std::optional<Notice> notice = ApplyRenamedApps()) // in case the last run could not
+		{
+			ShowNotice(*notice); // kept until the tray icon exists
+		}
 		RebuildItems();
 	}
 
 	void TrayApp::RebuildItems()
 	{
-		items_ = BuildAppItems(catalog_, settings_, FormatUtcNow());
+		items_ = BuildAppItems(catalog_, settings_, FormatUtcNow(), &usage_);
+	}
+
+	void TrayApp::SaveUsage()
+	{
+		std::wstring error;
+		if (!SaveUsageStats(usageFile_, usage_, error))
+		{
+			WriteLog(L"usage.json: " + error);
+		}
+	}
+
+	// Apps the scan found in a renamed folder (a new version) take the user's data along: their
+	// usage always, favorites and overrides once user.json can be written (until then the scans
+	// keep renamedFrom). Returns the notice for the user; the caller shows it.
+	std::optional<TrayApp::Notice> TrayApp::ApplyRenamedApps()
+	{
+		bool pending = false;
+		bool usageMoved = false;
+		for (const AppEntry& entry : catalog_.apps)
+		{
+			if (!entry.renamedFrom.empty() && !entry.missing)
+			{
+				pending = true;
+				usageMoved = MoveUsage(usage_, entry.renamedFrom, entry.id) || usageMoved;
+			}
+		}
+		if (usageMoved)
+		{
+			SaveUsage();
+		}
+		if (!pending)
+		{
+			return std::nullopt;
+		}
+		if (window_ != nullptr)
+		{
+			ReloadSettingsIfChanged(); // LoadData (no window yet) has just read it
+		}
+		if (settingsBroken_)
+		{
+			return std::nullopt;
+		}
+		const std::vector<RenamedApp> moved = MoveRenamedAppSettings(settings_, catalog_);
+		if (moved.empty())
+		{
+			return std::nullopt;
+		}
+		SaveSettings();
+		std::wstring names;
+		std::wstring reenable;
+		for (const RenamedApp& app : moved)
+		{
+			WriteLog(std::format(L"renamed: {} -> {}", app.from, app.to));
+			names += (names.empty() ? L"" : L", ") + app.name;
+			if (app.elevatedTaskDropped)
+			{
+				reenable += (reenable.empty() ? L"" : L", ") + app.name;
+			}
+		}
+		std::wstring message = std::format(text::RenamedAppsText, names);
+		if (!reenable.empty())
+		{
+			message += std::format(text::RenamedAppsReenable, reenable);
+		}
+		return Notice{text::RenamedAppsTitle, std::move(message), !reenable.empty()};
+	}
+
+	// A tray notification; before the icon exists (LoadData runs in the constructor) the last one
+	// waits for Run
+	void TrayApp::ShowNotice(const Notice& notice)
+	{
+		if (window_ == nullptr)
+		{
+			startupNotice_ = notice;
+			return;
+		}
+		trayIcon_.ShowNotification(notice.title, notice.text, notice.warning);
 	}
 
 	bool TrayApp::ReloadSettingsIfChanged()
@@ -223,6 +312,16 @@ namespace apptray
 			return false;
 		}
 		settingsWriteTime_ = writeTime;
+		if (!settingsBroken_)
+		{
+			// What the file held before this edit (AppTray has it in memory): if the edit goes
+			// wrong, user.json.bak is the last good version
+			std::wstring backupError;
+			if (!WriteJsonFile(settingsBackupFile_, SerializeUserSettings(settings_), backupError))
+			{
+				WriteLog(L"user.json.bak: " + backupError);
+			}
+		}
 		std::wstring error;
 		UserSettings loaded = LoadUserSettings(settingsFile_, error);
 		if (!error.empty())
@@ -239,6 +338,7 @@ namespace apptray
 		RebuildItems();
 		UpdateTip();
 		launcher_.RefreshItems();
+		RegisterLauncherHotkey(true); // registers again only when "hotkey" changed
 		return true;
 	}
 
@@ -258,6 +358,13 @@ namespace apptray
 		if (settingsBroken_)
 		{
 			return;
+		}
+		// The version being replaced stays as user.json.bak
+		std::error_code existsError;
+		if (fs::exists(settingsFile_, existsError)
+			&& !CopyFileW(settingsFile_.c_str(), settingsBackupFile_.c_str(), FALSE))
+		{
+			WriteLog(std::format(L"user.json.bak: error {}", GetLastError()));
 		}
 		std::wstring error;
 		if (!SaveUserSettings(settingsFile_, settings_, error))
@@ -314,7 +421,20 @@ namespace apptray
 		}
 		else
 		{
-			trayIcon_.ShowNotification(title, text, true);
+			ShowNotice({std::wstring(title), std::wstring(text), true});
+		}
+	}
+
+	void TrayApp::ReportInfo(std::wstring_view title, std::wstring_view text)
+	{
+		WriteLog(std::format(L"{}: {}", title, text));
+		if (launcher_.IsOpen())
+		{
+			launcher_.SetStatus(std::wstring(text));
+		}
+		else
+		{
+			ShowNotice({std::wstring(title), std::wstring(text), false});
 		}
 	}
 
@@ -371,6 +491,12 @@ namespace apptray
 		const LaunchResult result = StartItem(item, asAdmin);
 		if (result.started)
 		{
+			// Recent list and search ranking. The item is updated in place: a menu may hold the items.
+			const std::wstring now = FormatUtcNow();
+			RecordLaunch(usage_, item.entry->id, now);
+			items_[index].launchCount += 1;
+			items_[index].lastLaunched = now;
+			SaveUsage();
 			launcher_.RequestClose(); // called from list-view notifications: never destroy it now
 		}
 		else if (!result.cancelled)
@@ -685,6 +811,111 @@ namespace apptray
 		launcher_.RefreshItems();
 	}
 
+	// The .lnk is written by a child "AppTray.exe --create-shortcut": IShellLink would leave the
+	// shell namespace loaded in the tray
+	void TrayApp::CreateItemShortcut(size_t index, ShortcutPlace place)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		if (pendingShortcutName_) // one at a time
+		{
+			ReportInfo(text::CreateShortcut, text::ShortcutBusy);
+			return;
+		}
+		const AppItem& item = items_[index];
+		const std::wstring arguments = std::format(
+			L"--create-shortcut {} --shortcut-in {} --root {} --data {}", QuoteArgument(item.entry->id), ToString(place),
+			QuoteArgument(root_.wstring()), QuoteArgument(paths_.dataDirectory.wstring()));
+		if (!StartChildProcess(arguments, WM_APP_SHORTCUT_DONE, shortcutThread_))
+		{
+			ReportError(text::ShortcutFailed, DescribeLaunchError({false, false, GetLastError()}));
+			return;
+		}
+		pendingShortcutName_ = item.name;
+		pendingShortcutPlace_ = place;
+	}
+
+	void TrayApp::OnShortcutDone(DWORD exitCode)
+	{
+		if (shortcutThread_.joinable())
+		{
+			shortcutThread_.join();
+		}
+		const std::optional<std::wstring> name = std::exchange(pendingShortcutName_, std::nullopt);
+		if (exiting_ || !name)
+		{
+			return;
+		}
+		if (exitCode != 0)
+		{
+			ReportError(text::ShortcutFailed, L"detalles en AppTray.log");
+		}
+		else if (pendingShortcutPlace_ == ShortcutPlace::StartMenu)
+		{
+			ReportInfo(text::ShortcutCreatedTitle, std::format(text::ShortcutCreatedStartMenu, *name));
+		}
+		else
+		{
+			ReportInfo(text::ShortcutCreatedTitle, std::format(text::ShortcutCreatedDesktop, *name));
+		}
+	}
+
+	// user.json "hotkey" (Ctrl+Alt+Space by default) opens and closes the launcher from any
+	// program. A key another program holds is retried quietly each time the menu or the launcher
+	// opens; warn = false (at logon, where a second AppTray would complain every time) only logs it.
+	void TrayApp::RegisterLauncherHotkey(bool warn)
+	{
+		if (window_ == nullptr)
+		{
+			return;
+		}
+		if (hotkeyTried_ == settings_.hotkey)
+		{
+			if (hotkeyWaiting_
+				&& RegisterHotKey(window_, LauncherHotkeyId, hotkeyWaiting_->modifiers | MOD_NOREPEAT, hotkeyWaiting_->key))
+			{
+				hotkeyLabel_ = FormatHotkey(*hotkeyWaiting_);
+				hotkeyWaiting_.reset();
+				WriteLog(L"hotkey registered: " + hotkeyLabel_);
+			}
+			return;
+		}
+		hotkeyTried_ = settings_.hotkey;
+		hotkeyWaiting_.reset();
+		if (!hotkeyLabel_.empty())
+		{
+			UnregisterHotKey(window_, LauncherHotkeyId);
+			hotkeyLabel_.clear();
+		}
+		if (settings_.hotkey.empty())
+		{
+			return;
+		}
+		const std::optional<Hotkey> hotkey = ParseHotkey(settings_.hotkey);
+		if (!hotkey)
+		{
+			ReportError(text::HotkeyTitle, std::format(text::HotkeyInvalid, settings_.hotkey));
+			return;
+		}
+		if (!RegisterHotKey(window_, LauncherHotkeyId, hotkey->modifiers | MOD_NOREPEAT, hotkey->key))
+		{
+			hotkeyWaiting_ = hotkey;
+			const std::wstring message = std::format(text::HotkeyTaken, FormatHotkey(*hotkey));
+			if (warn)
+			{
+				ReportError(text::HotkeyTitle, message);
+			}
+			else
+			{
+				WriteLog(std::format(L"{}: {}", text::HotkeyTitle, message));
+			}
+			return;
+		}
+		hotkeyLabel_ = FormatHotkey(*hotkey);
+	}
+
 	// At logon (after the delay): open the "always" apps that are not running, then offer the
 	// "ask" ones in the dialog. The same rules StartupApps.ps1 had, for any app in the catalog.
 	void TrayApp::RunLogonApps()
@@ -901,10 +1132,12 @@ namespace apptray
 			return;
 		}
 
-		// New = first seen by this scan (regrouped suites keep their old date), never on the first
+		// New = first seen by this scan (regrouped suites and renamed folders keep their old date),
+		// never on the first
 		const bool hadCatalog = hasCatalog_;
 		catalog_ = std::move(*loaded);
 		hasCatalog_ = true;
+		std::optional<Notice> notice = ApplyRenamedApps();
 		const size_t newApps = !hadCatalog ? 0
 										   : static_cast<size_t>(std::count_if(
 												 catalog_.apps.begin(),
@@ -917,10 +1150,22 @@ namespace apptray
 		UpdateTip();
 		launcher_.RefreshItems();
 		WriteLog(std::format(L"refresh: {} apps, {} new", catalog_.apps.size(), newApps));
+		// One notification: a second one would replace the first while it is still on screen
 		if (newApps > 0)
 		{
-			trayIcon_.ShowNotification(
-				text::NewAppsTitle, std::format(L"{} apps nuevas desde el último refresco", newApps), false);
+			const std::wstring newText = std::format(text::NewAppsText, newApps);
+			if (notice)
+			{
+				notice->text += L". " + newText;
+			}
+			else
+			{
+				notice = Notice{text::NewAppsTitle, newText, false};
+			}
+		}
+		if (notice)
+		{
+			ShowNotice(*notice);
 		}
 		if (refreshAgain_)
 		{
@@ -972,6 +1217,7 @@ namespace apptray
 	void TrayApp::ShowLauncher()
 	{
 		ReloadSettingsIfChanged();
+		RegisterLauncherHotkey(false); // retries a hotkey another program held
 		CheckForUpdates(); // at most once a day
 		launcher_.Show(ChooseLauncherAnchor(trayIcon_.GetRect()));
 	}
@@ -1057,6 +1303,7 @@ namespace apptray
 	void TrayApp::ShowTrayMenu(POINT point)
 	{
 		ReloadSettingsIfChanged();
+		RegisterLauncherHotkey(false); // retries a hotkey another program held
 		CheckForUpdates(); // at most once a day
 		const MenuScope menuScope = EnterMenu(); // items stay put until the command has run
 		categoryMenus_.clear();
@@ -1067,7 +1314,9 @@ namespace apptray
 			AppendMenuW(menu, MF_STRING, NewVersionCommand, label.c_str());
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		}
-		AppendMenuW(menu, MF_STRING, OpenLauncherCommand, text::OpenLauncher);
+		const std::wstring openLabel =
+			hotkeyLabel_.empty() ? std::wstring(text::OpenLauncher) : std::format(L"{}\t{}", text::OpenLauncher, hotkeyLabel_);
+		AppendMenuW(menu, MF_STRING, OpenLauncherCommand, openLabel.c_str());
 		SetMenuDefaultItem(menu, OpenLauncherCommand, FALSE);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
@@ -1083,6 +1332,23 @@ namespace apptray
 			AppendAppMenuItem(menu, index, AppCommandBase + static_cast<UINT>(index));
 		}
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+		// The last apps opened that are not favorites already
+		AppFilter recent;
+		recent.kind = AppFilterKind::Recent;
+		size_t recentShown = 0;
+		for (const size_t index : FilterAppItems(items_, recent, settings_.favorites))
+		{
+			if (!items_[index].favorite && recentShown < TrayRecentLimit)
+			{
+				AppendAppMenuItem(menu, index, AppCommandBase + static_cast<UINT>(index));
+				++recentShown;
+			}
+		}
+		if (recentShown > 0)
+		{
+			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		}
 
 		// Categories open lazily (WM_INITMENUPOPUP), so only the icons of what is seen are read
 		for (const CategoryNode& category : BuildCategoryTree(items_, settings_.categoryDepth).children)
@@ -1174,6 +1440,11 @@ namespace apptray
 		Theme::ApplyMenuMode(Theme::IsSystemDark());
 		trayIcon_.Add(window_, WM_APP_TRAY, trayIconHandle_, text::AppName, GetTrayIconGuid(paths_.instanceName));
 		UpdateTip();
+		if (startupNotice_)
+		{
+			ShowNotice(*std::exchange(startupNotice_, std::nullopt));
+		}
+		RegisterLauncherHotkey(!atLogon);
 		RepairLogonRegistration(exePath_); // the folder may have moved since it was registered
 		if (atLogon)
 		{
@@ -1257,6 +1528,23 @@ namespace apptray
 		case WM_APP_TASK_DONE:
 			OnElevatedTaskDone(static_cast<DWORD>(wParam));
 			return 0;
+		case WM_APP_SHORTCUT_DONE:
+			OnShortcutDone(static_cast<DWORD>(wParam));
+			return 0;
+		case WM_HOTKEY:
+			// Not while a menu or the logon dialog runs its modal loop
+			if (wParam == LauncherHotkeyId && menuDepth_ == 0)
+			{
+				if (launcher_.IsOpen())
+				{
+					launcher_.Close();
+				}
+				else
+				{
+					ShowLauncher();
+				}
+			}
+			return 0;
 		case WM_TIMER:
 			// One-shot timers: nothing ticks while AppTray sits idle
 			KillTimer(window_, wParam);
@@ -1292,6 +1580,10 @@ namespace apptray
 		case WM_DESTROY:
 			exiting_ = true;
 			scanThread_.request_stop(); // the process ends now, not when a long scan finishes
+			if (!hotkeyLabel_.empty())
+			{
+				UnregisterHotKey(window_, LauncherHotkeyId);
+			}
 			launcher_.Close();
 			trayIcon_.Remove();
 			WriteLog(L"exit");

@@ -18,6 +18,7 @@ namespace apptray
 		std::uint64_t size = 0;
 		std::wstring productName;
 		std::wstring fileDescription;
+		std::wstring version;       // ProductVersion (else FileVersion), tidied: "4.0.1"
 	};
 
 	enum class InspectDetail

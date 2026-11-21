@@ -49,6 +49,8 @@ namespace apptray
 			AutostartAlwaysCommand,
 			AutostartAskCommand,
 			ElevatedCommand,
+			ShortcutDesktopCommand,
+			ShortcutStartMenuCommand,
 			AlternativeCommandBase = 100,
 		};
 
@@ -455,6 +457,7 @@ namespace apptray
 			}
 		};
 		addFixed(AppFilterKind::Favorites, text::Favorites, true);
+		addFixed(AppFilterKind::Recent, text::Recent, false);
 		addFixed(AppFilterKind::All, text::All, true);
 		addFixed(AppFilterKind::New, text::New, false);
 		AddCategoryNodes(
@@ -548,9 +551,10 @@ namespace apptray
 		const std::vector<AppItem>& items = app_.Items();
 		AppFilter effective = filter_;
 		// The app search stays inside the chosen folder (or hidden apps, or installers); from
-		// Favorites or New it looks everywhere, so typing a name right after opening finds it
+		// Favorites, Recent or New it looks everywhere, so typing a name right after opening finds it
 		if (!effective.search.empty()
-			&& (effective.kind == AppFilterKind::Favorites || effective.kind == AppFilterKind::New))
+			&& (effective.kind == AppFilterKind::Favorites || effective.kind == AppFilterKind::Recent
+				|| effective.kind == AppFilterKind::New))
 		{
 			effective.kind = AppFilterKind::All;
 		}
@@ -645,7 +649,8 @@ namespace apptray
 			const AppItem& item = app_.Items()[*index];
 			const std::wstring what = item.entry->description.empty() ? item.name : item.entry->description;
 			const std::wstring where = item.target.empty() ? std::wstring(text::OpensFolder) : item.target;
-			text = std::format(L"{}  ·  {}", what, where);
+			text = item.entry->version.empty() ? std::format(L"{}  ·  {}", what, where)
+											   : std::format(L"{}  ·  v{}  ·  {}", what, item.entry->version, where);
 		}
 		else if (noFolderMatch_)
 		{
@@ -715,6 +720,11 @@ namespace apptray
 		{
 			AppendMenuW(menu, MF_STRING, OpenHelpCommand, text::OpenHelp);
 		}
+		HMENU shortcut = CreatePopupMenu();
+		AppendMenuW(shortcut, MF_STRING, ShortcutDesktopCommand, text::ShortcutOnDesktop);
+		AppendMenuW(shortcut, MF_STRING, ShortcutStartMenuCommand, text::ShortcutInStartMenu);
+		AppendMenuW(
+			menu, MF_POPUP | (entry.missing ? MF_GRAYED : 0), reinterpret_cast<UINT_PTR>(shortcut), text::CreateShortcut);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, FavoriteCommand, item.favorite ? text::RemoveFavorite : text::AddFavorite);
 
@@ -792,6 +802,12 @@ namespace apptray
 			break;
 		case OpenHelpCommand:
 			app_.OpenItemReadme(index);
+			break;
+		case ShortcutDesktopCommand:
+			app_.CreateItemShortcut(index, ShortcutPlace::Desktop);
+			break;
+		case ShortcutStartMenuCommand:
+			app_.CreateItemShortcut(index, ShortcutPlace::StartMenu);
 			break;
 		case FavoriteCommand:
 			app_.ToggleItemFavorite(index);

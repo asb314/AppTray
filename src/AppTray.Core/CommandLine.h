@@ -24,6 +24,8 @@ namespace apptray
 		std::optional<std::wstring> registerTask;   // app id: create its elevated task (run elevated)
 		std::optional<std::wstring> unregisterTask; // app id: delete its elevated task (run elevated)
 		std::optional<std::wstring> taskUser;       // DOMAIN\user the elevated task runs for
+		std::optional<std::wstring> createShortcut; // app id: write a .lnk to it, then exit
+		std::optional<std::wstring> shortcutIn;     // "desktop" (default) or "startmenu"
 		std::optional<std::wstring> root; // scan root override
 		std::optional<std::wstring> data; // data folder override (catalog.json, user.json, log)
 		std::optional<std::wstring> report;

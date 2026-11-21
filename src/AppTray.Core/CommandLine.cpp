@@ -62,6 +62,14 @@ namespace apptray
 			{
 				options.taskUser = takeValue();
 			}
+			else if (EqualsIgnoreCase(argument, L"--create-shortcut"))
+			{
+				options.createShortcut = takeValue();
+			}
+			else if (EqualsIgnoreCase(argument, L"--shortcut-in"))
+			{
+				options.shortcutIn = takeValue();
+			}
 			else if (EqualsIgnoreCase(argument, L"--root"))
 			{
 				options.root = takeValue();
@@ -101,8 +109,8 @@ namespace apptray
 
 	std::wstring GetUsageText()
 	{
-		return L"AppTray.exe [--show | --exit | --startup | --scan [--report file.md] [--verbose] | --check-update]"
-			   L" [--root folder] [--data folder]";
+		return L"AppTray.exe [--show | --exit | --startup | --scan [--report file.md] [--verbose] | --check-update"
+			   L" | --create-shortcut id [--shortcut-in desktop|startmenu]] [--root folder] [--data folder]";
 	}
 
 	std::wstring QuoteArgument(std::wstring_view argument)

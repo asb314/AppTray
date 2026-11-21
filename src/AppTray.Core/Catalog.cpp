@@ -19,6 +19,10 @@ namespace apptray
 			{
 				json["description"] = ToJson(entry.description);
 			}
+			if (!entry.version.empty())
+			{
+				json["version"] = ToJson(entry.version);
+			}
 			json["category"] = ToJson(entry.category);
 			json["target"] = ToJson(entry.target);
 			if (!entry.alternatives.empty())
@@ -52,6 +56,10 @@ namespace apptray
 				json["missing"] = true;
 			}
 			json["firstSeen"] = ToJson(entry.firstSeen);
+			if (!entry.renamedFrom.empty())
+			{
+				json["renamedFrom"] = ToJson(entry.renamedFrom);
+			}
 			return json;
 		}
 
@@ -70,6 +78,7 @@ namespace apptray
 			entry.kind = ParseAppKind(GetString(json, "kind")).value_or(AppKind::Folder);
 			entry.name = GetString(json, "name", entry.id);
 			entry.description = GetString(json, "description");
+			entry.version = GetString(json, "version");
 			entry.category = GetString(json, "category");
 			entry.target = GetString(json, "target");
 			if (const auto found = json.find("alternatives"); found != json.end() && found->is_array())
@@ -89,6 +98,7 @@ namespace apptray
 			entry.alternate = GetBool(json, "alternate");
 			entry.missing = GetBool(json, "missing");
 			entry.firstSeen = GetString(json, "firstSeen");
+			entry.renamedFrom = GetString(json, "renamedFrom");
 			return entry;
 		}
 	}

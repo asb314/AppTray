@@ -3,10 +3,13 @@
 #include "AppLauncher.h"
 #include "AppList.h"
 #include "Catalog.h"
+#include "Hotkey.h"
 #include "LauncherWindow.h"
 #include "PathResolver.h"
+#include "Shortcut.h"
 #include "TrayIcon.h"
 #include "UpdateCheck.h"
+#include "UsageStats.h"
 #include "UserSettings.h"
 
 #include <windows.h>
@@ -77,6 +80,7 @@ namespace apptray
 		void SetSuiteExpanded(const std::wstring& id, bool expanded);
 		void SetItemAutostart(size_t index, AutostartMode mode);
 		void SetItemElevated(size_t index, bool enabled);
+		void CreateItemShortcut(size_t index, ShortcutPlace place);
 		void StartRefresh();
 		void OnLauncherClosed();
 
@@ -99,6 +103,13 @@ namespace apptray
 		}
 
 	private:
+		struct Notice
+		{
+			std::wstring title;
+			std::wstring text;
+			bool warning = false;
+		};
+
 		void LeaveMenu();
 		bool CanChangeSettings();
 		static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -107,6 +118,8 @@ namespace apptray
 		void LoadData();
 		bool ReloadSettingsIfChanged();
 		void SaveSettings();
+		void SaveUsage();
+		std::optional<Notice> ApplyRenamedApps();
 		void RebuildItems();
 		void UpdateTip();
 		void ToggleLauncher();
@@ -126,6 +139,10 @@ namespace apptray
 		void OnUpdateCheckDone(DWORD exitCode);
 		void ApplyUpdateState();
 		void OnElevatedTaskDone(DWORD exitCode);
+		void OnShortcutDone(DWORD exitCode);
+		void RegisterLauncherHotkey(bool warn);
+		void ReportInfo(std::wstring_view title, std::wstring_view text);
+		void ShowNotice(const Notice& notice);
 
 		HINSTANCE instance_;
 		AppPaths paths_;
@@ -133,6 +150,8 @@ namespace apptray
 		bool rootIsRemote_ = false;
 		std::filesystem::path catalogFile_;
 		std::filesystem::path settingsFile_;
+		std::filesystem::path settingsBackupFile_; // user.json.bak: the version before the last change
+		std::filesystem::path usageFile_;
 		std::filesystem::path exePath_; // this AppTray.exe, started with --scan for refreshes
 		HWND window_ = nullptr;
 		UINT taskbarCreatedMessage_ = 0;
@@ -145,6 +164,7 @@ namespace apptray
 		UserSettings settings_;
 		FILETIME settingsWriteTime_{};
 		bool settingsBroken_ = false; // user.json did not parse: never overwrite it
+		UsageStats usage_;
 		std::vector<AppItem> items_;
 
 		std::jthread scanThread_;
@@ -163,6 +183,16 @@ namespace apptray
 		std::jthread elevationThread_;         // waits for the elevated --register-task copy
 		std::wstring pendingTaskId_;
 		bool pendingTaskEnable_ = false;
+
+		std::jthread shortcutThread_;          // waits for "AppTray.exe --create-shortcut"
+		std::optional<std::wstring> pendingShortcutName_;
+		ShortcutPlace pendingShortcutPlace_ = ShortcutPlace::Desktop;
+
+		std::optional<std::wstring> hotkeyTried_; // user.json "hotkey" last registered (or refused)
+		std::wstring hotkeyLabel_;                // as the tray menu shows it; empty = none active
+		std::optional<Hotkey> hotkeyWaiting_;     // refused (another program had it): retried quietly
+
+		std::optional<Notice> startupNotice_; // raised before the tray icon exists, shown once it does
 
 		// Tray menu state, valid while the menu is open
 		std::unordered_map<HMENU, std::wstring> categoryMenus_;

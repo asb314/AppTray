@@ -26,11 +26,14 @@ namespace apptray
 		AppKind kind = AppKind::Folder;
 		std::wstring name;
 		std::wstring description; // product name and file description of the target
+		std::wstring version;     // of the target (version resource) or from the folder name
 		std::wstring category;    // relative path of the containing folder: "Media/Audio/Editor"
 		std::wstring target;      // relative path of the executable; empty for a Suite
 		std::vector<std::wstring> alternatives; // other executables of the same app
 		std::wstring readme;      // readme.txt / LEEME.txt / *.chm of the app, if any
 		std::wstring firstSeen;   // UTC time of the scan that found it first
+		std::wstring renamedFrom; // id of the folder it replaced (a new version), until the user's
+		                          // data there has moved to this id
 		int confidence = 0;       // name match of the target with its folder, 0..100
 		bool requiresAdmin = false;
 		bool console = false;

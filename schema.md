@@ -19,10 +19,10 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 
 | File | Responsibility |
 |---|---|
-| `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
-| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes), tray menu (category submenus filled on `WM_INITMENUPOPUP`), background refresh, actions on apps, logon apps, Start with Windows, daily update check |
+| `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), `--create-shortcut`, single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
+| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps, shortcuts, logon apps, Start with Windows, daily update check |
 | `StartupPrompt` | The logon dialog: "ask" apps as a check-box list view with a countdown (Abrir / Ninguna) |
-| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`), app search over an owner-data list view (scoped to the chosen folder); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
+| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), status line with version; created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
 | `TrayIcon` | `Shell_NotifyIcon` v4 with a GUID (falls back to a plain id if refused): add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
@@ -48,7 +48,8 @@ for the antivirus to clear each executable opened, and those waits overlap.
 
 Other child processes, same mechanism (`StartChildProcess`): `--check-update` at most once a day
 (exit 10 = newer release; the result is read from `data\update.json`, a failure retries in an
-hour). Creating or deleting an elevated task runs `AppTray.exe --register-task <id>` with
+hour), and `--create-shortcut <id> --shortcut-in desktop|startmenu` (`IShellLink` loads the
+shell namespace, which would stay in the tray's memory). Creating or deleting an elevated task runs `AppTray.exe --register-task <id>` with
 `runas` instead (one UAC prompt); `elevatedTask` is written to `user.json` only when that copy
 exits with 0.
 
@@ -59,6 +60,18 @@ running ones (`ProcessFinder`: every process image path, matched by file, or by 
 for folder and PortableApps apps). An app that needs administrator opens through its elevated
 task or not at all. The logon run holds a `MenuScope`, so a refresh cannot swap the items
 under the dialog.
+
+Renamed app folders (a new version): `MergeCatalog` pairs an app gone from disk with an unknown
+one of the same lineage (category, kind, backup flag, `NormalizeName` of the folder name, which
+drops the numbers) when there is exactly one of each. The new entry keeps the old `firstSeen`
+and gets `renamedFrom`; the old one is not kept as missing. The scan never writes `user.json`,
+so the tray does the move after loading the catalog (`MoveRenamedAppSettings`: favorites in
+place, override and hand-written keys, target rebased or dropped, elevated task dropped) and
+moves the usage. Until user.json can be written, later scans keep `renamedFrom`.
+
+Hotkey: `RegisterHotKey` on the tray window (`MOD_NOREPEAT`); `WM_HOTKEY` toggles the launcher
+(ignored while a menu or the logon dialog is open). The input that fires it lets the launcher
+take the foreground. Re-registered only when `"hotkey"` changes.
 
 A finished refresh never replaces the items while a popup menu is open (`TrayApp::MenuScope`):
 its result waits until the menu's command has run. A `user.json` that does not parse is never
@@ -72,15 +85,18 @@ a `std::stop_token` (used by callers that scan in-process).
 | `AppEntry` | One catalog entry (`AppKind`: folder, file, portableApps, installer, suite) |
 | `FolderScanner` | Walks the tree and decides what is a category and what is an app |
 | `ExeRanker` | Picks the main executable of an app folder (scoring) and spots installers by name |
-| `ExeInspector` | Reads PE header, version resource and manifest without running the file |
-| `NameTokens` | Tokenizes file/folder names and scores how well they match |
+| `ExeInspector` | Reads PE header, version resource (names, product version) and manifest without running the file |
+| `NameTokens` | Tokenizes file/folder names and scores how well they match; tidies versions and finds one in a name |
 | `Catalog` | `catalog.json` load/save |
-| `UserSettings` | `user.json` load/save (keeps unknown keys) |
-| `CatalogMerger` | Fresh scan + previous catalog + user data → new catalog |
+| `UserSettings` | `user.json` load/save (keeps unknown keys); `SerializeUserSettings` also feeds `user.json.bak` |
+| `CatalogMerger` | Fresh scan + previous catalog + user data → new catalog (renamed version folders recognized); `MoveRenamedAppSettings` moves the user's data to them |
+| `UsageStats` | `usage.json`: launch count and last launch per app; record, move, load/save |
+| `Hotkey` | Parses and formats the global hotkey (`"Ctrl+Alt+Space"`, Spanish key names too) |
+| `Shortcut` | `.lnk` files with `IShellLink` (desktop, Start menu\Programs\AppTray), file names without forbidden characters |
 | `CatalogRefresher` | Scan + merge + save in one call, thread-safe (used by `--scan` and the tray's background refresh) |
-| `AppList` | Catalog + `user.json` → items the UI shows (overrides, favorites, hidden, new, autostart); filters, accent-insensitive search, category tree, logon plan |
+| `AppList` | Catalog + `user.json` + usage → items the UI shows (overrides, favorites, hidden, new, autostart, launches); filters (Recent too), accent-insensitive search that also matches initials, ranking by launches while searching, category tree, logon plan |
 | `AppLauncher` | `ShellExecuteEx` launch (normal or `runas`), open folder/document, reveal in Explorer |
-| `ElevatedTask` | Task Scheduler (COM) tasks in `\AppTray` (name = readable id + FNV-1a hash): run elevated on demand with the user's interactive token, no trigger; create (for the user passed with `--task-user`), delete, run only if its action still matches the app's exe and arguments |
+| `ElevatedTask` | Task Scheduler (COM) tasks in `\AppTray` (name = readable id + FNV-1a hash): run elevated on demand with the user's interactive token, no trigger; create (for the user passed with `--task-user`), delete, run only if its action still matches the app's exe and arguments; delete orphans (program inside the root and gone) on every create/delete |
 | `LogonRegistration` | The HKCU `Run` value `AppTray` (`"exe" --startup`): read, set, delete, repair when the exe moved |
 | `ProcessFinder` | Image paths of running processes (`QueryFullProcessImageName`, works for elevated ones) and the "is this app running" test |
 | `UpdateCheck` | Latest GitHub release over WinHTTP, version comparison, `update.json` |
@@ -137,14 +153,18 @@ scripts, −10 other scripts, −30 per helper word (`plugin`, `cli`, `service`,
 ## Data files
 
 - `catalog.json`: `root`, `scannedAt`, `baselineAt`, `apps[]` with `id`, `kind`, `name`,
-	`description`, `category`, `target`, `alternatives`, `readme`, `confidence`,
-	`requiresAdmin`, `console`, `alternate`, `missing`, `firstSeen`.
-- `user.json`: `root`, `startupDelaySeconds`, `startupPromptSeconds`, `checkForUpdates`,
+	`description`, `version`, `category`, `target`, `alternatives`, `readme`, `confidence`,
+	`requiresAdmin`, `console`, `alternate`, `missing`, `firstSeen`, `renamedFrom` (old id of a
+	renamed version folder, until the user's data has moved).
+- `user.json`: `root`, `startupDelaySeconds`, `startupPromptSeconds`, `checkForUpdates`, `hotkey`,
 	`categoryDepth` (folder levels shown as categories in the launcher tree and the tray menu:
 	0 = all, 1 = top level only; deeper apps belong to the last level shown),
 	`scan{maxDepth, ignore, skipNames}`, `favorites[]`, `apps{id: {hidden, name, category,
 	target, args, expand, autostart (no/always/ask), askDefault, elevatedTask}}`. Start with
 	Windows is the HKCU Run value itself, not a setting.
+- `user.json.bak`: the previous version of `user.json` (copied before AppTray saves; written
+	from memory when a hand edit is noticed, so a broken edit leaves the last good one).
+- `usage.json`: `apps{lowercase id: {count, last}}`, written by the tray after each launch.
 - `update.json`: `checkedAt`, `latestVersion`, `url`, `notifiedVersion` (announced once).
 
 ## Dependencies

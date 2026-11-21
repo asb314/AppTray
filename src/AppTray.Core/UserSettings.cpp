@@ -272,6 +272,7 @@ namespace apptray
 		settings.startupPromptSeconds = GetInt(document, "startupPromptSeconds", settings.startupPromptSeconds);
 		settings.categoryDepth = std::clamp(GetInt(document, "categoryDepth", settings.categoryDepth), 0, 20);
 		settings.checkForUpdates = GetBool(document, "checkForUpdates", settings.checkForUpdates);
+		settings.hotkey = Trim(GetString(document, "hotkey", settings.hotkey));
 		if (const auto scan = document.find("scan"); scan != document.end() && scan->is_object())
 		{
 			settings.scan.maxDepth = std::clamp(GetInt(*scan, "maxDepth", settings.scan.maxDepth), 1, 20);
@@ -295,6 +296,11 @@ namespace apptray
 
 	bool SaveUserSettings(const fs::path& file, const UserSettings& settings, std::wstring& error)
 	{
+		return WriteJsonFile(file, SerializeUserSettings(settings), error);
+	}
+
+	Json SerializeUserSettings(const UserSettings& settings)
+	{
 		Json json = settings.document.is_object() ? settings.document : Json::object();
 		json["version"] = SettingsVersion;
 		if (settings.root)
@@ -310,6 +316,7 @@ namespace apptray
 		json["startupPromptSeconds"] = settings.startupPromptSeconds;
 		json["categoryDepth"] = settings.categoryDepth;
 		json["checkForUpdates"] = settings.checkForUpdates;
+		json["hotkey"] = ToJson(settings.hotkey);
 
 		Json scan = json.contains("scan") && json["scan"].is_object() ? json["scan"] : Json::object();
 		scan["maxDepth"] = settings.scan.maxDepth;
@@ -345,6 +352,6 @@ namespace apptray
 			}
 		}
 		json["apps"] = std::move(apps);
-		return WriteJsonFile(file, json, error);
+		return json;
 	}
 }

@@ -173,6 +173,24 @@ namespace apptray
 				{
 					comments = QueryVersionString(data, block, L"Comments");
 				}
+				if (info.version.empty())
+				{
+					info.version = NormalizeVersion(QueryVersionString(data, block, L"ProductVersion"));
+				}
+			}
+			for (size_t i = 0; i < blocks.size() && info.version.empty(); ++i)
+			{
+				info.version = NormalizeVersion(QueryVersionString(data, blocks[i], L"FileVersion"));
+			}
+			// Without strings, the numeric version every resource has
+			VS_FIXEDFILEINFO* fixed = nullptr;
+			UINT fixedLength = 0;
+			if (info.version.empty() && VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&fixed), &fixedLength)
+				&& fixed != nullptr && fixedLength >= sizeof(VS_FIXEDFILEINFO) && fixed->dwSignature == 0xFEEF04BD)
+			{
+				info.version = NormalizeVersion(std::format(
+					L"{}.{}.{}.{}", HIWORD(fixed->dwProductVersionMS), LOWORD(fixed->dwProductVersionMS),
+					HIWORD(fixed->dwProductVersionLS), LOWORD(fixed->dwProductVersionLS)));
 			}
 		}
 

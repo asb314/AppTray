@@ -266,6 +266,67 @@ namespace apptray
 		return true;
 	}
 
+	std::vector<std::wstring> DeleteOrphanedElevatedTasks(const fs::path& root, std::wstring& error)
+	{
+		std::vector<std::wstring> deleted;
+		std::error_code rootError;
+		if (root.empty() || !fs::is_directory(root, rootError))
+		{
+			return deleted;
+		}
+		const wil::com_ptr_nothrow<ITaskService> service = ConnectService(error);
+		if (!service)
+		{
+			return deleted;
+		}
+		std::wstring folderError;
+		const wil::com_ptr_nothrow<ITaskFolder> folder = GetTaskFolder(service.get(), false, folderError);
+		wil::com_ptr_nothrow<IRegisteredTaskCollection> tasks;
+		if (!folder || FAILED(folder->GetTasks(TASK_ENUM_HIDDEN, &tasks)))
+		{
+			return deleted;
+		}
+		std::wstring prefix = root.lexically_normal().wstring();
+		if (!prefix.ends_with(L'\\'))
+		{
+			prefix += L'\\';
+		}
+		LONG count = 0;
+		tasks->get_Count(&count);
+		std::vector<std::wstring> orphaned;
+		for (LONG i = 1; i <= count; ++i)
+		{
+			VARIANT index = MakeEmptyVariant();
+			index.vt = VT_I4;
+			index.lVal = i;
+			wil::com_ptr_nothrow<IRegisteredTask> task;
+			std::wstring program;
+			std::wstring arguments;
+			if (FAILED(tasks->get_Item(index, &task)) || !GetTaskCommand(task.get(), program, arguments) || program.empty())
+			{
+				continue;
+			}
+			const std::wstring normalized = fs::path(program).lexically_normal().wstring();
+			std::error_code existsError;
+			const bool insideRoot = normalized.size() > prefix.size()
+				&& IsSamePath(normalized.substr(0, prefix.size()), prefix);
+			if (insideRoot && !fs::exists(normalized, existsError) && !existsError)
+			{
+				BSTR name = nullptr;
+				const HRESULT result = task->get_Name(&name);
+				orphaned.push_back(TakeBstr(result, name));
+			}
+		}
+		for (const std::wstring& name : orphaned)
+		{
+			if (!name.empty() && SUCCEEDED(folder->DeleteTask(MakeBstr(name).get(), 0)))
+			{
+				deleted.push_back(name);
+			}
+		}
+		return deleted;
+	}
+
 	ElevatedTaskRun RunElevatedTask(
 		const std::wstring& name, const fs::path& program, const std::wstring& arguments, std::wstring& error)
 	{

@@ -25,4 +25,14 @@ namespace apptray
 	// 100 same normalized name, 70 one contains the other, 40-60 shared tokens,
 	// 30 a long token of one appears inside the other, 0 unrelated.
 	int ScoreNameMatch(std::wstring_view folderName, std::wstring_view fileName);
+
+	// Tidies a version resource string down to its number: "1, 2, 3, 0" -> "1.2.3",
+	// "Version 6.0a (Build 150)" -> "6.0a", "Release 0.85" -> "0.85", "2026.10.21 on Python 3.10"
+	// -> "2026.10.21", "0.1.3+8909da1" -> "0.1.3". Empty without a leading number ("BadCopy Pro")
+	// or when it is all zeros.
+	std::wstring NormalizeVersion(std::wstring_view raw);
+
+	// First dotted number in a folder or file name: "QGIS 4.0.0 light" -> "4.0.0",
+	// "rufus-4.15p" -> "4.15"; empty when there is none ("HandBrake_1", "7-Zip")
+	std::wstring FindVersionInName(std::wstring_view name);
 }

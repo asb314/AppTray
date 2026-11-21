@@ -49,6 +49,7 @@ namespace apptray
 		int startupPromptSeconds = 15;
 		int categoryDepth = 0; // levels of folders shown as categories: 0 = all, 1 = top level only
 		bool checkForUpdates = true; // once a day, ask GitHub whether a newer release exists
+		std::wstring hotkey = L"Ctrl+Alt+Space"; // opens the launcher from anywhere; empty = none
 		ScanSettings scan;
 		std::vector<std::wstring> favorites;
 		std::map<std::wstring, AppOverride> apps;
@@ -75,4 +76,7 @@ namespace apptray
 	// A missing file gives the defaults (no error). A broken file gives the defaults and an error.
 	UserSettings LoadUserSettings(const std::filesystem::path& file, std::wstring& error);
 	bool SaveUserSettings(const std::filesystem::path& file, const UserSettings& settings, std::wstring& error);
+
+	// The JSON SaveUserSettings writes (also used for the user.json.bak copy)
+	Json SerializeUserSettings(const UserSettings& settings);
 }

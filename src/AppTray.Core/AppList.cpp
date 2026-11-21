@@ -1,5 +1,6 @@
 #include "AppList.h"
 
+#include "NameTokens.h"
 #include "PathResolver.h"
 #include "StringUtil.h"
 
@@ -66,6 +67,51 @@ namespace apptray
 			return words;
 		}
 
+		// First letters of the words of a name: with camelCase humps split ("FastStone Image
+		// Viewer" -> "fsiv") and without ("fiv"); variants of one letter are left out
+		std::wstring MakeInitials(const std::wstring& name)
+		{
+			std::wstring result;
+			for (const bool splitCamelCase : {true, false})
+			{
+				std::wstring letters;
+				for (const std::wstring& word : SplitNameWords(name, splitCamelCase))
+				{
+					letters.push_back(word.front());
+				}
+				letters = FoldForSearch(letters);
+				if (letters.size() >= 2 && letters != result)
+				{
+					result += (result.empty() ? L"" : L" ") + letters;
+				}
+			}
+			return result;
+		}
+
+		// A search word of two letters or more that starts one of the initials variants
+		bool MatchesInitials(std::wstring_view initials, std::wstring_view word)
+		{
+			if (word.size() < 2)
+			{
+				return false;
+			}
+			size_t start = 0;
+			while (start < initials.size())
+			{
+				size_t end = initials.find(L' ', start);
+				if (end == std::wstring_view::npos)
+				{
+					end = initials.size();
+				}
+				if (initials.substr(start, end - start).starts_with(word))
+				{
+					return true;
+				}
+				start = end + 1;
+			}
+			return false;
+		}
+
 		bool IsInCategory(const std::wstring& category, const std::wstring& path)
 		{
 			if (path.empty())
@@ -89,6 +135,8 @@ namespace apptray
 				return !item.hidden && !item.hiddenByDefault;
 			case AppFilterKind::Favorites:
 				return item.favorite;
+			case AppFilterKind::Recent:
+				return !item.lastLaunched.empty() && !item.hidden && !item.hiddenByDefault && !item.entry->missing;
 			case AppFilterKind::New:
 				return item.isNew && !item.hidden && !item.hiddenByDefault;
 			case AppFilterKind::Category:
@@ -102,7 +150,8 @@ namespace apptray
 		}
 	}
 
-	std::vector<AppItem> BuildAppItems(const Catalog& catalog, const UserSettings& settings, std::wstring_view now)
+	std::vector<AppItem> BuildAppItems(
+		const Catalog& catalog, const UserSettings& settings, std::wstring_view now, const UsageStats* usage)
 	{
 		const std::optional<std::int64_t> nowSeconds = ParseUtcSeconds(now);
 		std::vector<AppItem> items;
@@ -132,7 +181,13 @@ namespace apptray
 				item.askDefault = user.askDefault;
 				item.elevatedTask = user.elevatedTask;
 			}
+			if (const AppUsage* used = usage != nullptr ? usage->Find(entry.id) : nullptr)
+			{
+				item.launchCount = used->count;
+				item.lastLaunched = used->lastLaunched;
+			}
 			item.searchText = FoldForSearch(item.name + L" " + entry.id + L" " + entry.description + L" " + item.category);
+			item.initials = MakeInitials(item.name);
 			items.push_back(std::move(item));
 		}
 		return items;
@@ -151,7 +206,8 @@ namespace apptray
 				continue;
 			}
 			const bool matchesSearch = std::all_of(
-				words.begin(), words.end(), [&](const std::wstring& w) { return item.searchText.find(w) != std::wstring::npos; });
+				words.begin(), words.end(), [&](const std::wstring& w)
+				{ return item.searchText.find(w) != std::wstring::npos || MatchesInitials(item.initials, w); });
 			if (matchesSearch)
 			{
 				result.push_back(i);
@@ -174,19 +230,52 @@ namespace apptray
 			return result;
 		}
 
-		const std::wstring first = words.empty() ? std::wstring{} : words.front();
-		const auto startsWithFirst = [&](size_t index)
-		{ return !first.empty() && FoldForSearch(items[index].name).starts_with(first); };
-		std::stable_sort(result.begin(), result.end(), [&](size_t a, size_t b)
+		if (filter.kind == AppFilterKind::Recent && words.empty())
+		{
+			// ISO timestamps sort by time
+			std::stable_sort(result.begin(), result.end(), [&](size_t a, size_t b)
+				{ return items[a].lastLaunched > items[b].lastLaunched; });
+			if (result.size() > RecentAppLimit)
 			{
-				const bool aFirst = startsWithFirst(a);
-				const bool bFirst = startsWithFirst(b);
-				if (aFirst != bFirst)
+				result.resize(RecentAppLimit);
+			}
+			return result;
+		}
+
+		struct Ranked
+		{
+			size_t index = 0;
+			int match = 0;    // 2: the name starts with the first word (searchText does); 1: its initials
+			int launches = 0; // only counts while searching
+		};
+		const std::wstring first = words.empty() ? std::wstring{} : words.front();
+		std::vector<Ranked> ranked;
+		ranked.reserve(result.size());
+		for (const size_t index : result)
+		{
+			const AppItem& item = items[index];
+			const int match = first.empty()                       ? 0
+				: item.searchText.starts_with(first)             ? 2
+				: MatchesInitials(item.initials, first)          ? 1
+																 : 0;
+			ranked.push_back({index, match, first.empty() ? 0 : item.launchCount});
+		}
+		std::stable_sort(ranked.begin(), ranked.end(), [&](const Ranked& a, const Ranked& b)
+			{
+				if (a.match != b.match)
 				{
-					return aFirst;
+					return a.match > b.match;
 				}
-				return IsLessIgnoreCase(items[a].name, items[b].name);
+				if (a.launches != b.launches)
+				{
+					return a.launches > b.launches;
+				}
+				return IsLessIgnoreCase(items[a.index].name, items[b.index].name);
 			});
+		for (size_t i = 0; i < ranked.size(); ++i)
+		{
+			result[i] = ranked[i].index;
+		}
 		return result;
 	}
 
@@ -300,8 +389,9 @@ namespace apptray
 	{
 		AppFilter filter;
 		filter.kind = kind;
-		return static_cast<size_t>(
+		const size_t count = static_cast<size_t>(
 			std::count_if(items.begin(), items.end(), [&](const AppItem& item) { return MatchesKind(item, filter); }));
+		return kind == AppFilterKind::Recent ? std::min(count, RecentAppLimit) : count;
 	}
 
 	AutostartPlan PlanAutostart(const std::vector<AppItem>& items, const std::function<bool(const AppItem&)>& isRunning)

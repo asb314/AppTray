@@ -206,4 +206,117 @@ namespace apptray
 		}
 		return 0;
 	}
+
+	std::wstring NormalizeVersion(std::wstring_view raw)
+	{
+		// "1, 2, 3, 0" (old resource compilers) -> "1.2.3.0"
+		std::wstring text;
+		for (size_t i = 0; i < raw.size(); ++i)
+		{
+			if (raw[i] != L',')
+			{
+				text.push_back(raw[i]);
+				continue;
+			}
+			text.push_back(L'.');
+			while (i + 1 < raw.size() && raw[i + 1] == L' ')
+			{
+				++i;
+			}
+		}
+		text = Trim(text);
+		// "Version 6.0a", "Release 0.85", "v2.1": the word goes when a number follows
+		for (const std::wstring_view word : {L"version", L"release", L"ver", L"rel", L"v"})
+		{
+			if (StartsWithIgnoreCase(text, word))
+			{
+				const std::wstring after = Trim(std::wstring_view(text).substr(word.size()));
+				if (!after.empty() && IsDigit(after[0]))
+				{
+					text = after;
+					break;
+				}
+			}
+		}
+
+		// The leading dotted number, plus a short tag stuck to it ("6.0a", "4.15p", "1.2rc1").
+		// Build data ("+8909da14...", "-win-x64", " (build 7)", " on Python 3.10") is dropped.
+		size_t numberEnd = 0;
+		while (numberEnd < text.size() && (IsDigit(text[numberEnd]) || text[numberEnd] == L'.'))
+		{
+			++numberEnd;
+		}
+		std::wstring number = text.substr(0, numberEnd);
+		while (!number.empty() && number.back() == L'.')
+		{
+			number.pop_back();
+		}
+		if (number.empty())
+		{
+			return {}; // a name ("BadCopy Pro"), not a version
+		}
+		size_t tagEnd = numberEnd;
+		while (tagEnd < text.size() && (IsLetter(text[tagEnd]) || IsDigit(text[tagEnd])))
+		{
+			++tagEnd;
+		}
+		constexpr size_t MaxTagLength = 6;
+		const std::wstring tag = tagEnd - numberEnd <= MaxTagLength ? text.substr(numberEnd, tagEnd - numberEnd) : L"";
+
+		std::vector<std::wstring> parts;
+		size_t start = 0;
+		for (size_t dot = number.find(L'.'); dot != std::wstring::npos; dot = number.find(L'.', start))
+		{
+			parts.push_back(number.substr(start, dot - start));
+			start = dot + 1;
+		}
+		parts.push_back(number.substr(start));
+		const bool allZero = std::all_of(parts.begin(), parts.end(), [](const std::wstring& part)
+			{ return std::all_of(part.begin(), part.end(), [](wchar_t c) { return c == L'0'; }); });
+		if (allZero && tag.empty())
+		{
+			return {};
+		}
+		// "1.2.3.0" -> "1.2.3": a fourth part that is zero says nothing
+		while (parts.size() > 3 && parts.back() == L"0")
+		{
+			parts.pop_back();
+		}
+		std::wstring version;
+		for (const std::wstring& part : parts)
+		{
+			version += (version.empty() ? L"" : L".") + part;
+		}
+		return version + tag;
+	}
+
+	std::wstring FindVersionInName(std::wstring_view name)
+	{
+		size_t i = 0;
+		while (i < name.size())
+		{
+			if (!IsDigit(name[i]))
+			{
+				++i;
+				continue;
+			}
+			// Digits, then any ".digits" groups
+			const size_t start = i;
+			bool dotted = false;
+			while (i < name.size() && IsDigit(name[i]))
+			{
+				++i;
+				if (i + 1 < name.size() && name[i] == L'.' && IsDigit(name[i + 1]))
+				{
+					dotted = true;
+					++i;
+				}
+			}
+			if (dotted)
+			{
+				return std::wstring(name.substr(start, i - start));
+			}
+		}
+		return {};
+	}
 }

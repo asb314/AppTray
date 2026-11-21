@@ -22,6 +22,7 @@ namespace apptray::text
 	inline constexpr wchar_t FolderSearchCue[] = L"Buscar carpeta";
 	inline constexpr wchar_t NoFolderMatches[] = L"Ninguna carpeta coincide";
 	inline constexpr wchar_t Favorites[] = L"Favoritos";
+	inline constexpr wchar_t Recent[] = L"Recientes";
 	inline constexpr wchar_t All[] = L"Todas";
 	inline constexpr wchar_t New[] = L"Nuevas";
 	inline constexpr wchar_t InstallersAndCopies[] = L"Instaladores y copias";
@@ -39,6 +40,9 @@ namespace apptray::text
 	inline constexpr wchar_t OpenAsAdmin[] = L"Abrir como administrador";
 	inline constexpr wchar_t OpenFolder[] = L"Abrir carpeta";
 	inline constexpr wchar_t OpenHelp[] = L"Ayuda";
+	inline constexpr wchar_t CreateShortcut[] = L"Crear acceso directo";
+	inline constexpr wchar_t ShortcutOnDesktop[] = L"En el escritorio";
+	inline constexpr wchar_t ShortcutInStartMenu[] = L"En el menú Inicio";
 	inline constexpr wchar_t AddFavorite[] = L"Añadir a favoritos\tCtrl+D";
 	inline constexpr wchar_t RemoveFavorite[] = L"Quitar de favoritos\tCtrl+D";
 	inline constexpr wchar_t UseOtherExecutable[] = L"Usar otro ejecutable";
@@ -70,6 +74,19 @@ namespace apptray::text
 	inline constexpr wchar_t NewVersionTitle[] = L"Nueva versión de AppTray";
 	inline constexpr wchar_t NewVersionText[] = L"La {} está disponible (tienes la {}). Menú del icono → Nueva versión.";
 	inline constexpr wchar_t LogonTitle[] = L"Inicio de sesión";
+	inline constexpr wchar_t ShortcutCreatedTitle[] = L"Acceso directo creado";
+	inline constexpr wchar_t ShortcutCreatedDesktop[] = L"Acceso directo a {} creado en el escritorio";
+	inline constexpr wchar_t ShortcutCreatedStartMenu[] = L"Acceso directo a {} creado en el menú Inicio (carpeta AppTray)";
+	inline constexpr wchar_t ShortcutFailed[] = L"No se pudo crear el acceso directo";
+	inline constexpr wchar_t ShortcutBusy[] = L"Ya se está creando otro acceso directo: prueba de nuevo en un momento";
+	inline constexpr wchar_t HotkeyTitle[] = L"Atajo de teclado";
+	inline constexpr wchar_t HotkeyInvalid[] =
+		L"«{}» no es un atajo válido (p. ej. Ctrl+Alt+Space): revisa «hotkey» en user.json";
+	inline constexpr wchar_t HotkeyTaken[] = L"{} ya lo usa otro programa: cambia «hotkey» en user.json";
+	inline constexpr wchar_t RenamedAppsTitle[] = L"Apps actualizadas";
+	inline constexpr wchar_t RenamedAppsText[] = L"Tus ajustes pasan a la carpeta nueva de: {}";
+	inline constexpr wchar_t RenamedAppsReenable[] = L". Vuelve a activar «Abrir sin UAC» en: {}";
+	inline constexpr wchar_t NewAppsText[] = L"{} apps nuevas desde el último refresco";
 
 	// Logon dialog
 	inline constexpr wchar_t StartupPromptTitle[] = L"Inicio de sesión";

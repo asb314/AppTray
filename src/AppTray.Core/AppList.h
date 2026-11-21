@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Catalog.h"
+#include "UsageStats.h"
 #include "UserSettings.h"
 
 #include <cstddef>
@@ -26,18 +27,26 @@ namespace apptray
 		AutostartMode autostart = AutostartMode::No;
 		bool askDefault = false;         // checked in the logon dialog
 		bool elevatedTask = false;       // started through its own elevated scheduled task
+		int launchCount = 0;             // opened from AppTray (usage.json)
+		std::wstring lastLaunched;       // UTC, empty if never
 		std::wstring searchText;         // folded name, id, description and category
+		std::wstring initials;           // of the name's words, folded: "fsiv fiv" (FastStone Image Viewer)
 	};
 
 	// Days during which an app found after the first scan counts as new
 	constexpr int NewAppDays = 30;
 
-	std::vector<AppItem> BuildAppItems(const Catalog& catalog, const UserSettings& settings, std::wstring_view now);
+	// Apps in the Recent list
+	constexpr size_t RecentAppLimit = 15;
+
+	std::vector<AppItem> BuildAppItems(
+		const Catalog& catalog, const UserSettings& settings, std::wstring_view now, const UsageStats* usage = nullptr);
 
 	enum class AppFilterKind
 	{
 		All,        // everything not hidden
 		Favorites,  // in the user's order
+		Recent,     // last opened first, at most RecentAppLimit
 		New,
 		Category,   // a category and everything below it
 		Installers, // installers and backup copies
@@ -51,8 +60,11 @@ namespace apptray
 		std::wstring search; // words separated by spaces; all must match (case and accents ignored)
 	};
 
-	// Indices into items. Sorted by name; with a search, names starting with the first word
-	// come first; favorites keep the user's order.
+	// Indices into items. A search word matches anywhere in the name, folder, description or
+	// category, or the start of the name's initials ("vsc" -> Visual Studio Code). Sorted by name;
+	// with a search, names starting with the first word come first, then names whose initials do,
+	// and within each group the apps opened most often. Favorites keep the user's order, Recent
+	// its time order.
 	std::vector<size_t> FilterAppItems(
 		const std::vector<AppItem>& items, const AppFilter& filter, const std::vector<std::wstring>& favorites);
 

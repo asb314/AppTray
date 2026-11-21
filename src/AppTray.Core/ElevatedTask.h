@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace apptray
 {
@@ -29,6 +30,12 @@ namespace apptray
 		const std::wstring& name, const std::filesystem::path& program, const std::wstring& arguments,
 		const std::wstring& user, std::wstring& error);
 	bool DeleteElevatedTask(const std::wstring& name, std::wstring& error);
+
+	// Deletes the tasks whose program was inside root and is gone (the app's folder was renamed for
+	// a new version, or deleted), so no elevated task is left pointing at a path anyone could fill
+	// again. Does nothing if root itself is missing (an unplugged drive). Needs elevation. Returns
+	// the names deleted.
+	std::vector<std::wstring> DeleteOrphanedElevatedTasks(const std::filesystem::path& root, std::wstring& error);
 
 	enum class ElevatedTaskRun
 	{
