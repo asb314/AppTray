@@ -60,8 +60,9 @@ namespace apptray
 		std::vector<CategoryNode> children;
 	};
 
-	// Tree of the categories of the visible apps (root has an empty path)
-	CategoryNode BuildCategoryTree(const std::vector<AppItem>& items);
+	// Tree of the categories of the visible apps (root has an empty path). maxDepth > 0 keeps only
+	// that many levels: deeper apps count in (and belong to) their ancestor at the last level.
+	CategoryNode BuildCategoryTree(const std::vector<AppItem>& items, int maxDepth = 0);
 
 	// Counts for the fixed filters, to show or hide them in the UI
 	size_t CountAppItems(const std::vector<AppItem>& items, AppFilterKind kind);

@@ -101,6 +101,7 @@ namespace apptray
 		std::uint64_t generation_ = 0;
 		std::unique_ptr<IconWorker> iconWorker_;
 		std::vector<AppFilter> treeFilters_; // lParam of the tree nodes
+		std::vector<std::wstring> expandedCategories_; // open branches, kept while AppTray runs
 		bool populatingTree_ = false;
 		AppFilter filter_;
 		bool filterChosen_ = false;

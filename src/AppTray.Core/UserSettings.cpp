@@ -256,6 +256,7 @@ namespace apptray
 		settings.startWithWindows = GetBool(document, "startWithWindows", settings.startWithWindows);
 		settings.startupDelaySeconds = GetInt(document, "startupDelaySeconds", settings.startupDelaySeconds);
 		settings.startupPromptSeconds = GetInt(document, "startupPromptSeconds", settings.startupPromptSeconds);
+		settings.categoryDepth = std::clamp(GetInt(document, "categoryDepth", settings.categoryDepth), 0, 20);
 		if (const auto scan = document.find("scan"); scan != document.end() && scan->is_object())
 		{
 			settings.scan.maxDepth = std::clamp(GetInt(*scan, "maxDepth", settings.scan.maxDepth), 1, 20);
@@ -292,6 +293,7 @@ namespace apptray
 		json["startWithWindows"] = settings.startWithWindows;
 		json["startupDelaySeconds"] = settings.startupDelaySeconds;
 		json["startupPromptSeconds"] = settings.startupPromptSeconds;
+		json["categoryDepth"] = settings.categoryDepth;
 
 		Json scan = json.contains("scan") && json["scan"].is_object() ? json["scan"] : Json::object();
 		scan["maxDepth"] = settings.scan.maxDepth;

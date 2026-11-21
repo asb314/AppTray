@@ -685,7 +685,7 @@ namespace apptray
 			return;
 		}
 		const std::wstring path = found->second;
-		const CategoryNode tree = BuildCategoryTree(items_);
+		const CategoryNode tree = BuildCategoryTree(items_, settings_.categoryDepth);
 		const CategoryNode* node = FindCategory(tree, path);
 		if (node == nullptr)
 		{
@@ -698,12 +698,18 @@ namespace apptray
 			categoryMenus_.emplace(submenu, child.path);
 			AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), EscapeMenuText(child.name).c_str());
 		}
+		// Apps of this category, and of deeper folders that have no submenu of their own (the
+		// tree is cut at categoryDepth)
 		AppFilter filter;
 		filter.kind = AppFilterKind::Category;
 		filter.category = path;
 		for (const size_t index : FilterAppItems(items_, filter, settings_.favorites))
 		{
-			if (CompareStringOrdinal(items_[index].category.c_str(), -1, path.c_str(), -1, TRUE) == CSTR_EQUAL)
+			const std::wstring& category = items_[index].category;
+			const bool inSubmenu = std::any_of(
+				node->children.begin(), node->children.end(), [&](const CategoryNode& child)
+				{ return EqualsIgnoreCase(category, child.path) || StartsWithIgnoreCase(category, child.path + L"/"); });
+			if (!inSubmenu)
 			{
 				AppendAppMenuItem(menu, index, AppCommandBase + static_cast<UINT>(index));
 			}
@@ -738,7 +744,7 @@ namespace apptray
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 
 		// Categories open lazily (WM_INITMENUPOPUP), so only the icons of what is seen are read
-		for (const CategoryNode& category : BuildCategoryTree(items_).children)
+		for (const CategoryNode& category : BuildCategoryTree(items_, settings_.categoryDepth).children)
 		{
 			HMENU submenu = CreatePopupMenu();
 			categoryMenus_.emplace(submenu, category.path);

@@ -76,6 +76,8 @@ arguments, 3 root not found.
 - `user.json` — your choices (favorites, hidden apps, another executable, arguments,
 	autostart, scan options). Created with defaults on first use; edit freely ("Edit settings"
 	in the tray menu), AppTray reloads it when it changes and keeps unknown keys.
+	`"categoryDepth"` sets how many folder levels become categories: `0` (default) the whole
+	tree, `1` only the top-level folders (each holding all its apps), `2` one sublevel...
 - `AppTray.log`.
 
 ## Gotchas

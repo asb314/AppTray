@@ -187,7 +187,7 @@ namespace apptray
 		return result;
 	}
 
-	CategoryNode BuildCategoryTree(const std::vector<AppItem>& items)
+	CategoryNode BuildCategoryTree(const std::vector<AppItem>& items, int maxDepth)
 	{
 		CategoryNode root;
 		for (const AppItem& item : items)
@@ -199,7 +199,7 @@ namespace apptray
 			++root.count;
 			CategoryNode* node = &root;
 			size_t start = 0;
-			while (start <= item.category.size())
+			for (int level = 1; start <= item.category.size() && (maxDepth <= 0 || level <= maxDepth); ++level)
 			{
 				const size_t slash = item.category.find(L'/', start);
 				const size_t end = slash == std::wstring::npos ? item.category.size() : slash;

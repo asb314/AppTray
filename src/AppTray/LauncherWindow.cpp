@@ -1,6 +1,7 @@
 #include "LauncherWindow.h"
 
 #include "PathResolver.h"
+#include "StringUtil.h"
 #include "Strings.h"
 #include "TrayApp.h"
 #include "UiCommon.h"
@@ -84,7 +85,7 @@ namespace apptray
 
 		bool IsSameFilter(const AppFilter& a, const AppFilter& b)
 		{
-			return a.kind == b.kind && (a.kind != AppFilterKind::Category || a.category == b.category);
+			return a.kind == b.kind && (a.kind != AppFilterKind::Category || EqualsIgnoreCase(a.category, b.category));
 		}
 
 		void RegisterLauncherClass(HINSTANCE instance, WNDPROC procedure)
@@ -250,7 +251,8 @@ namespace apptray
 
 		tree_ = CreateWindowExW(
 			0, WC_TREEVIEWW, L"",
-			WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT
+			// TVS_LINESATROOT: without it the top-level categories show no expand arrow
+			WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT
 				| TVS_TRACKSELECT | TVS_NOHSCROLL,
 			0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(TreeId)), instance, nullptr);
 		TreeView_SetExtendedStyle(tree_, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
@@ -400,6 +402,12 @@ namespace apptray
 			filter.category = child.path;
 			const HTREEITEM item = AddTreeNode(parent, std::format(L"{}  ({})", child.name, child.count), filter);
 			AddCategoryNodes(item, child);
+			if (std::any_of(
+					expandedCategories_.begin(), expandedCategories_.end(),
+					[&](const std::wstring& path) { return EqualsIgnoreCase(path, child.path); }))
+			{
+				TreeView_Expand(tree_, item, TVE_EXPAND); // as the user left it
+			}
 		}
 	}
 
@@ -423,12 +431,15 @@ namespace apptray
 		addFixed(AppFilterKind::Favorites, text::Favorites, true);
 		addFixed(AppFilterKind::All, text::All, true);
 		addFixed(AppFilterKind::New, text::New, false);
-		AddCategoryNodes(TVI_ROOT, BuildCategoryTree(items));
+		AddCategoryNodes(TVI_ROOT, BuildCategoryTree(items, app_.Settings().categoryDepth));
 		addFixed(AppFilterKind::Installers, text::InstallersAndCopies, false);
 		addFixed(AppFilterKind::Hidden, text::Hidden, false);
 
-		// Select the node of the current filter (walking the whole tree), or "All"
+		// Select the node of the current filter (walking the whole tree). A category cut away by
+		// categoryDepth falls back to its deepest ancestor still shown; anything else to "All".
 		HTREEITEM selected = nullptr;
+		HTREEITEM ancestor = nullptr;
+		size_t ancestorLength = 0;
 		HTREEITEM all = nullptr;
 		const auto visit = [&](auto& self, HTREEITEM item) -> void
 		{
@@ -443,6 +454,13 @@ namespace apptray
 				{
 					selected = item;
 				}
+				if (filter.kind == AppFilterKind::Category && filter_.kind == AppFilterKind::Category
+					&& filter.category.size() > ancestorLength
+					&& StartsWithIgnoreCase(filter_.category, filter.category + L"/"))
+				{
+					ancestor = item;
+					ancestorLength = filter.category.size();
+				}
 				if (filter.kind == AppFilterKind::All)
 				{
 					all = item;
@@ -451,6 +469,15 @@ namespace apptray
 			}
 		};
 		visit(visit, TreeView_GetRoot(tree_));
+		if (selected == nullptr && ancestor != nullptr)
+		{
+			selected = ancestor;
+			TVITEMW data{};
+			data.mask = TVIF_PARAM;
+			data.hItem = ancestor;
+			TreeView_GetItem(tree_, &data);
+			filter_.category = treeFilters_[static_cast<size_t>(data.lParam)].category;
+		}
 		if (selected == nullptr)
 		{
 			selected = all;
@@ -808,6 +835,22 @@ namespace apptray
 
 	LRESULT LauncherWindow::OnNotify(const NMHDR* header)
 	{
+		if (header->hwndFrom == tree_ && header->code == TVN_ITEMEXPANDEDW && !populatingTree_)
+		{
+			// Remember open branches for the next time the tree is filled (window reopened, refresh)
+			const auto* change = reinterpret_cast<const NMTREEVIEWW*>(header);
+			const size_t filterIndex = static_cast<size_t>(change->itemNew.lParam);
+			if (filterIndex < treeFilters_.size() && treeFilters_[filterIndex].kind == AppFilterKind::Category)
+			{
+				const std::wstring& path = treeFilters_[filterIndex].category;
+				std::erase_if(expandedCategories_, [&](const std::wstring& saved) { return EqualsIgnoreCase(saved, path); });
+				if ((change->action & TVE_EXPAND) != 0)
+				{
+					expandedCategories_.push_back(path);
+				}
+			}
+			return 0;
+		}
 		if (header->hwndFrom == tree_ && header->code == TVN_SELCHANGEDW && !populatingTree_)
 		{
 			const auto* change = reinterpret_cast<const NMTREEVIEWW*>(header);

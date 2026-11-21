@@ -137,6 +137,30 @@ TEST(AppList, Should_BuildSortedCategoryTreeWithCounts)
 	EXPECT_EQ(root.children[1].name, L"Utils");
 }
 
+TEST(AppList, Should_CutCategoryTreeAtMaxDepth)
+{
+	Catalog catalog;
+	catalog.apps = {
+		MakeEntry(L"Media/Audio/Editor/Wave", L"Media/Audio/Editor", L"Wave"),
+		MakeEntry(L"Media/Audio/Tag", L"Media/Audio", L"Tag"),
+		MakeEntry(L"Media/Player", L"Media", L"Player"),
+	};
+	const std::vector<AppItem> items = BuildAppItems(catalog, {}, L"2026-11-21T10:00:00Z");
+
+	const CategoryNode top = BuildCategoryTree(items, 1);
+	ASSERT_EQ(top.children.size(), 1u);
+	EXPECT_EQ(top.children[0].count, 3);       // everything below Media counts in Media
+	EXPECT_TRUE(top.children[0].children.empty());
+
+	const CategoryNode two = BuildCategoryTree(items, 2);
+	ASSERT_EQ(two.children[0].children.size(), 1u);
+	EXPECT_EQ(two.children[0].children[0].path, L"Media/Audio");
+	EXPECT_EQ(two.children[0].children[0].count, 2); // Editor's app counts in Audio
+	EXPECT_TRUE(two.children[0].children[0].children.empty());
+
+	EXPECT_EQ(BuildCategoryTree(items).children[0].children[0].children.size(), 1u); // all levels
+}
+
 TEST(UserSettings, Should_ToggleFavoritesAndDropEmptyOverrides)
 {
 	UserSettings settings;

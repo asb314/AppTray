@@ -119,6 +119,8 @@ scripts, −10 other scripts, −30 per helper word (`plugin`, `cli`, `service`,
 	`description`, `category`, `target`, `alternatives`, `readme`, `confidence`,
 	`requiresAdmin`, `console`, `alternate`, `missing`, `firstSeen`.
 - `user.json`: `root`, `startWithWindows`, `startupDelaySeconds`, `startupPromptSeconds`,
+	`categoryDepth` (folder levels shown as categories in the launcher tree and the tray menu:
+	0 = all, 1 = top level only; deeper apps belong to the last level shown),
 	`scan{maxDepth, ignore, skipNames}`, `favorites[]`, `apps{id: {hidden, name, category,
 	target, args, expand, autostart, askDefault, elevatedTask}}`.
 

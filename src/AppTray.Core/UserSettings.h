@@ -48,6 +48,7 @@ namespace apptray
 		bool startWithWindows = false;
 		int startupDelaySeconds = 30;
 		int startupPromptSeconds = 15;
+		int categoryDepth = 0; // levels of folders shown as categories: 0 = all, 1 = top level only
 		ScanSettings scan;
 		std::vector<std::wstring> favorites;
 		std::map<std::wstring, AppOverride> apps;
