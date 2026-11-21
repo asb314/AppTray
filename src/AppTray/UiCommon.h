@@ -17,6 +17,7 @@ namespace apptray
 	inline constexpr UINT WM_APP_UPDATE_DONE = WM_APP + 6; // wParam: exit code of --check-update
 	inline constexpr UINT WM_APP_TASK_DONE = WM_APP + 7;   // wParam: exit code of --register/--unregister-task
 	inline constexpr UINT WM_APP_SHORTCUT_DONE = WM_APP + 8; // wParam: exit code of --create-shortcut
+	inline constexpr UINT WM_APP_ABOUT = WM_APP + 9;         // show "Acerca de" once the menu is gone
 
 	inline constexpr wchar_t TrayWindowClass[] = L"AppTray.TrayWindow";
 	inline constexpr wchar_t LauncherWindowClass[] = L"AppTray.Launcher";

@@ -119,7 +119,7 @@ namespace apptray
 		return hotkey;
 	}
 
-	std::wstring FormatHotkey(const Hotkey& hotkey)
+	std::wstring FormatHotkey(const Hotkey& hotkey, bool spanishNames)
 	{
 		std::wstring text;
 		if ((hotkey.modifiers & MOD_CONTROL) != 0)
@@ -132,7 +132,7 @@ namespace apptray
 		}
 		if ((hotkey.modifiers & MOD_SHIFT) != 0)
 		{
-			text += L"Mayús+";
+			text += spanishNames ? L"Mayús+" : L"Shift+";
 		}
 		if ((hotkey.modifiers & MOD_WIN) != 0)
 		{
@@ -140,7 +140,7 @@ namespace apptray
 		}
 		if (hotkey.key == VK_SPACE)
 		{
-			text += L"Espacio";
+			text += spanishNames ? L"Espacio" : L"Space";
 		}
 		else if (hotkey.key >= VK_F1 && hotkey.key <= VK_F24)
 		{

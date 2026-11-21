@@ -129,6 +129,8 @@ TEST(Hotkey, Should_ParseModifiersAndKeys_InEnglishOrSpanish)
 	EXPECT_EQ(spanish->modifiers, static_cast<unsigned int>(MOD_WIN | MOD_SHIFT));
 	EXPECT_EQ(spanish->key, static_cast<unsigned int>('A'));
 	EXPECT_EQ(FormatHotkey(*spanish), L"Mayús+Win+A");
+	EXPECT_EQ(FormatHotkey(*spanish, false), L"Shift+Win+A");
+	EXPECT_EQ(FormatHotkey(*space, false), L"Ctrl+Alt+Space");
 
 	const std::optional<Hotkey> function = ParseHotkey(L"Ctrl+F12");
 	ASSERT_TRUE(function.has_value());
@@ -422,6 +424,19 @@ TEST(UserSettings, Should_DefaultTheHotkey_And_KeepAnEmptyOne)
 	settings.hotkey.clear(); // turned off
 	ASSERT_TRUE(SaveUserSettings(file, settings, error)) << error;
 	EXPECT_EQ(LoadUserSettings(file, error).hotkey, L"");
+}
+
+TEST(UserSettings, Should_DefaultTheLanguageToAuto_And_KeepAChoice)
+{
+	TestTree tree;
+	const std::filesystem::path file = tree.Root() / L"user.json";
+	std::wstring error;
+	UserSettings settings = LoadUserSettings(file, error);
+	EXPECT_EQ(settings.language, L"auto");
+
+	settings.language = L"en";
+	ASSERT_TRUE(SaveUserSettings(file, settings, error)) << error;
+	EXPECT_EQ(LoadUserSettings(file, error).language, L"en");
 }
 
 TEST(CommandLine, Should_ParseShortcutCreation)

@@ -9,7 +9,7 @@ vcpkg.json                   dependencies, manifest mode (triplet x64-windows-st
 build/AppTray.Common.props   shared compiler/linker settings: C++20, /W4 /WX, static CRT, LTCG
 src/AppTray.Core/            static library, no UI: everything testable
 src/AppTray/                 the program (Windows subsystem): tray icon, launcher, menus
-tests/AppTray.Core.Tests/    GoogleTest unit tests for AppTray.Core
+tests/AppTray.Core.Tests/    GoogleTest unit tests for AppTray.Core (and the UI texts in Strings.h)
 tools/Deploy-AppTray.ps1     build + test + install into a folder (closes a running copy)
 tools/New-Release.ps1        build + test + zip (+ SHA-256); -Publish tags and creates the GitHub release
 tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
@@ -20,14 +20,14 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 | File | Responsibility |
 |---|---|
 | `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), `--create-shortcut`, single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
-| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps, shortcuts, logon apps, Start with Windows, daily update check |
+| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps, shortcuts, logon apps, Start with Windows, daily update check (and on demand), "Acerca de" task dialog |
 | `StartupPrompt` | The logon dialog: "ask" apps as a check-box list view with a countdown (Abrir / Ninguna) |
 | `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), status line with version, a painted menu button (and F10) that opens the tray menu owned by the launcher (it forwards `WM_INITMENUPOPUP`); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
 | `TrayIcon` | `Shell_NotifyIcon` v4 with a GUID (falls back to a plain id if refused): add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
 | `UiCommon` | Window messages, DPI helpers, system font, instance name and the tray icon GUID derived from it |
-| `Strings.h` | All user-facing texts (Spanish) |
+| `Strings.h` | All user-facing texts, Spanish and English (`text::Text`; `text::Format` for the ones with `{}`); the language follows Windows or user.json `language` |
 
 Memory: the launcher window, its image list, fonts and icon thread exist only while it is open.
 After loading the catalog, after each refresh and when the launcher closes, the heap is
@@ -157,6 +157,7 @@ scripts, −10 other scripts, −30 per helper word (`plugin`, `cli`, `service`,
 	`requiresAdmin`, `console`, `alternate`, `missing`, `firstSeen`, `renamedFrom` (old id of a
 	renamed version folder, until the user's data has moved).
 - `user.json`: `root`, `startupDelaySeconds`, `startupPromptSeconds`, `checkForUpdates`, `hotkey`,
+	`language` (auto/es/en),
 	`categoryDepth` (folder levels shown as categories in the launcher tree and the tray menu:
 	0 = all, 1 = top level only; deeper apps belong to the last level shown),
 	`scan{maxDepth, ignore, skipNames}`, `favorites[]`, `apps{id: {hidden, name, category,

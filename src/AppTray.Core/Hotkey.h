@@ -18,6 +18,6 @@ namespace apptray
 	// would be taken from every program.
 	std::optional<Hotkey> ParseHotkey(std::wstring_view text);
 
-	// How the menus show it: "Ctrl+Alt+Espacio"
-	std::wstring FormatHotkey(const Hotkey& hotkey);
+	// How the menus show it: "Ctrl+Alt+Espacio", or with English names "Ctrl+Alt+Space"
+	std::wstring FormatHotkey(const Hotkey& hotkey, bool spanishNames = true);
 }

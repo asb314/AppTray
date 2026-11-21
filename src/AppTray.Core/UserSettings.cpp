@@ -273,6 +273,7 @@ namespace apptray
 		settings.categoryDepth = std::clamp(GetInt(document, "categoryDepth", settings.categoryDepth), 0, 20);
 		settings.checkForUpdates = GetBool(document, "checkForUpdates", settings.checkForUpdates);
 		settings.hotkey = Trim(GetString(document, "hotkey", settings.hotkey));
+		settings.language = ToLower(Trim(GetString(document, "language", settings.language)));
 		if (const auto scan = document.find("scan"); scan != document.end() && scan->is_object())
 		{
 			settings.scan.maxDepth = std::clamp(GetInt(*scan, "maxDepth", settings.scan.maxDepth), 1, 20);
@@ -317,6 +318,7 @@ namespace apptray
 		json["categoryDepth"] = settings.categoryDepth;
 		json["checkForUpdates"] = settings.checkForUpdates;
 		json["hotkey"] = ToJson(settings.hotkey);
+		json["language"] = ToJson(settings.language);
 
 		Json scan = json.contains("scan") && json["scan"].is_object() ? json["scan"] : Json::object();
 		scan["maxDepth"] = settings.scan.maxDepth;

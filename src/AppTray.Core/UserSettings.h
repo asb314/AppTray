@@ -50,6 +50,7 @@ namespace apptray
 		int categoryDepth = 0; // levels of folders shown as categories: 0 = all, 1 = top level only
 		bool checkForUpdates = true; // once a day, ask GitHub whether a newer release exists
 		std::wstring hotkey = L"Ctrl+Alt+Space"; // opens the launcher from anywhere; empty = none
+		std::wstring language = L"auto";         // UI texts: "es", "en", or "auto" (Windows' language)
 		ScanSettings scan;
 		std::vector<std::wstring> favorites;
 		std::map<std::wstring, AppOverride> apps;

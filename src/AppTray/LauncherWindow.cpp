@@ -59,7 +59,7 @@ namespace apptray
 		{
 			if (category.empty())
 			{
-				return text::RootCategory;
+				return text::RootCategory.Get();
 			}
 			std::wstring result;
 			for (const wchar_t c : category)
@@ -255,12 +255,12 @@ namespace apptray
 		folderSearch_ = CreateWindowExW(
 			0, WC_EDITW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, window_,
 			reinterpret_cast<HMENU>(static_cast<INT_PTR>(FolderSearchId)), instance, nullptr);
-		SendMessageW(folderSearch_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(text::FolderSearchCue));
+		SendMessageW(folderSearch_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(text::FolderSearchCue.Get()));
 
 		search_ = CreateWindowExW(
 			0, WC_EDITW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, window_,
 			reinterpret_cast<HMENU>(static_cast<INT_PTR>(SearchId)), instance, nullptr);
-		SendMessageW(search_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(text::SearchCue));
+		SendMessageW(search_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(text::SearchCue.Get()));
 
 		tree_ = CreateWindowExW(
 			0, WC_TREEVIEWW, L"",
@@ -678,7 +678,7 @@ namespace apptray
 		}
 		else
 		{
-			text = app_.DescribeCatalog() + L"  ·  " + text::Keys;
+			text = app_.DescribeCatalog() + L"  ·  " + text::Keys.Get();
 		}
 		SetWindowTextW(status_, text.c_str());
 	}

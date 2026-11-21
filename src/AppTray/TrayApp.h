@@ -145,7 +145,12 @@ namespace apptray
 		void ApplyUpdateState(bool announce);
 		void OnElevatedTaskDone(DWORD exitCode);
 		void OnShortcutDone(DWORD exitCode);
+		void ShowAbout();
+		static HRESULT CALLBACK HandleAboutNotification(
+			HWND dialog, UINT notification, WPARAM wParam, LPARAM lParam, LONG_PTR data);
 		void RegisterLauncherHotkey(bool warn);
+		std::wstring DescribeHotkey(const Hotkey& hotkey) const;
+		bool ApplyLanguage();
 		void ReportInfo(std::wstring_view title, std::wstring_view text);
 		void ShowNotice(const Notice& notice);
 
@@ -195,10 +200,12 @@ namespace apptray
 		ShortcutPlace pendingShortcutPlace_ = ShortcutPlace::Desktop;
 
 		std::optional<std::wstring> hotkeyTried_; // user.json "hotkey" last registered (or refused)
-		std::wstring hotkeyLabel_;                // as the tray menu shows it; empty = none active
+		std::optional<Hotkey> hotkeyActive_;      // registered
 		std::optional<Hotkey> hotkeyWaiting_;     // refused (another program had it): retried quietly
 
 		std::optional<Notice> startupNotice_; // raised before the tray icon exists, shown once it does
+		bool aboutOpen_ = false;
+		HWND aboutWindow_ = nullptr; // the About dialog while it is open
 
 		// Tray menu state, valid while the menu is open
 		std::unordered_map<HMENU, std::wstring> categoryMenus_;

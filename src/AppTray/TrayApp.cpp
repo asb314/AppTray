@@ -39,6 +39,7 @@ namespace apptray
 			StartWithWindowsCommand,
 			NewVersionCommand,
 			CheckUpdateCommand,
+			AboutCommand,
 			ExitCommand,
 			AppCommandBase = 10000,
 		};
@@ -190,6 +191,7 @@ namespace apptray
 		const bool hadSettings = fs::exists(settingsFile_, existsError);
 		settings_ = LoadUserSettings(settingsFile_, error);
 		settingsBroken_ = !error.empty();
+		ApplyLanguage();
 		if (settingsBroken_)
 		{
 			WriteLog(L"user.json: " + error);
@@ -285,12 +287,12 @@ namespace apptray
 				reenable += (reenable.empty() ? L"" : L", ") + app.name;
 			}
 		}
-		std::wstring message = std::format(text::RenamedAppsText, names);
+		std::wstring message = text::Format(text::RenamedAppsText, names);
 		if (!reenable.empty())
 		{
-			message += std::format(text::RenamedAppsReenable, reenable);
+			message += text::Format(text::RenamedAppsReenable, reenable);
 		}
-		return Notice{text::RenamedAppsTitle, std::move(message), !reenable.empty()};
+		return Notice{text::RenamedAppsTitle.Get(), std::move(message), !reenable.empty()};
 	}
 
 	// A tray notification; before the icon exists (LoadData runs in the constructor) the last one
@@ -334,13 +336,33 @@ namespace apptray
 		}
 		settingsBroken_ = false;
 		settings_ = std::move(loaded);
+		const bool languageChanged = ApplyLanguage();
 		root_ = PathResolver::ResolveRoot(paths_.rootOverride, settings_.root, paths_.exeDirectory);
 		rootIsRemote_ = GetDriveTypeW(root_.root_path().c_str()) == DRIVE_REMOTE;
 		RebuildItems();
 		UpdateTip();
 		launcher_.RefreshItems();
+		if (languageChanged)
+		{
+			launcher_.RequestClose(); // its search boxes and hints were written in the old language
+		}
 		RegisterLauncherHotkey(true); // registers again only when "hotkey" changed
 		return true;
+	}
+
+	// user.json "language" ("auto" follows Windows): texts built from now on use it. True when it
+	// changed.
+	bool TrayApp::ApplyLanguage()
+	{
+		const text::Language language = text::ResolveLanguage(settings_.language);
+		const bool changed = language != text::currentLanguage;
+		text::SetLanguage(language);
+		return changed;
+	}
+
+	std::wstring TrayApp::DescribeHotkey(const Hotkey& hotkey) const
+	{
+		return FormatHotkey(hotkey, text::IsSpanish());
 	}
 
 	bool TrayApp::CanChangeSettings()
@@ -390,7 +412,7 @@ namespace apptray
 	{
 		if (!hasCatalog_)
 		{
-			return text::Refreshing;
+			return text::Refreshing.Get();
 		}
 		const size_t visible = CountAppItems(items_, AppFilterKind::All);
 		std::wstring description = std::format(L"{} apps  ·  {}", visible, FormatLocalTime(catalog_.scannedAt));
@@ -655,7 +677,7 @@ namespace apptray
 		}
 		scanning_ = true;
 		UpdateTip();
-		launcher_.SetStatus(text::Refreshing);
+		launcher_.SetStatus(text::Refreshing.Get());
 	}
 
 	// Starts "AppTray.exe <arguments>" at below-normal priority and a thread that posts
@@ -721,7 +743,7 @@ namespace apptray
 		const AppItem& item = items_[index];
 		if (mode != AutostartMode::No && item.entry->requiresAdmin && !item.elevatedTask)
 		{
-			ReportError(text::LogonTitle, std::format(text::NeedsElevatedTask, item.name));
+			ReportError(text::LogonTitle, text::Format(text::NeedsElevatedTask, item.name));
 		}
 	}
 
@@ -799,7 +821,7 @@ namespace apptray
 		}
 		if (exitCode != 0)
 		{
-			ReportError(text::TaskFailed, L"detalles en AppTray.log");
+			ReportError(text::TaskFailed, text::SeeLog);
 			return;
 		}
 		if (!CanChangeSettings())
@@ -851,16 +873,88 @@ namespace apptray
 		}
 		if (exitCode != 0)
 		{
-			ReportError(text::ShortcutFailed, L"detalles en AppTray.log");
+			ReportError(text::ShortcutFailed, text::SeeLog);
 		}
 		else if (pendingShortcutPlace_ == ShortcutPlace::StartMenu)
 		{
-			ReportInfo(text::ShortcutCreatedTitle, std::format(text::ShortcutCreatedStartMenu, *name));
+			ReportInfo(text::ShortcutCreatedTitle, text::Format(text::ShortcutCreatedStartMenu, *name));
 		}
 		else
 		{
-			ReportInfo(text::ShortcutCreatedTitle, std::format(text::ShortcutCreatedDesktop, *name));
+			ReportInfo(text::ShortcutCreatedTitle, text::Format(text::ShortcutCreatedDesktop, *name));
 		}
+	}
+
+	// "Acerca de AppTray": version, what it lists, the hotkey, links to the project and to the
+	// data folder. A task dialog gives clickable links with no window code of our own. It is
+	// centred on the screen (the tray window it belongs to is hidden).
+	void TrayApp::ShowAbout()
+	{
+		if (aboutOpen_ || exiting_)
+		{
+			return;
+		}
+		// Its modal loop is like a menu's: no launcher (it would get no keyboard shortcuts), no
+		// logon dialog and no new items until it closes
+		const MenuScope scope = EnterMenu();
+		aboutOpen_ = true;
+		const std::wstring heading = std::format(L"{} {}", text::AppName, APPTRAY_VERSION_WIDE);
+		const std::wstring apps = hasCatalog_
+			? text::Format(text::AboutApps, CountAppItems(items_, AppFilterKind::All), root_.wstring())
+			: text::Format(text::AboutScanning, root_.wstring());
+		std::wstring hotkey = text::AboutNoHotkey.Get();
+		if (hotkeyActive_)
+		{
+			hotkey = DescribeHotkey(*hotkeyActive_);
+		}
+		else if (hotkeyWaiting_)
+		{
+			hotkey = text::Format(text::AboutHotkeyInUse, DescribeHotkey(*hotkeyWaiting_));
+		}
+		const std::wstring content = text::Format(text::AboutText, apps, hotkey, APPTRAY_REPOSITORY);
+		TASKDIALOGCONFIG config{};
+		config.cbSize = sizeof(config);
+		config.hwndParent = window_;
+		config.hInstance = instance_;
+		config.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+		// Its own button: a common one would follow Windows' language, not AppTray's
+		const TASKDIALOG_BUTTON close{IDCLOSE, text::Close};
+		config.pButtons = &close;
+		config.cButtons = 1;
+		config.nDefaultButton = IDCLOSE;
+		config.pszWindowTitle = text::About;
+		config.pszMainIcon = MAKEINTRESOURCEW(IDI_APPTRAY);
+		config.pszMainInstruction = heading.c_str();
+		config.pszContent = content.c_str();
+		config.pfCallback = &TrayApp::HandleAboutNotification;
+		config.lpCallbackData = reinterpret_cast<LONG_PTR>(this);
+		SetForegroundWindow(window_);
+		TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
+		aboutWindow_ = nullptr;
+		aboutOpen_ = false;
+	}
+
+	HRESULT CALLBACK TrayApp::HandleAboutNotification(
+		HWND dialog, UINT notification, WPARAM, LPARAM lParam, LONG_PTR data)
+	{
+		TrayApp* self = reinterpret_cast<TrayApp*>(data);
+		if (notification == TDN_CREATED)
+		{
+			self->aboutWindow_ = dialog; // a click on the tray icon brings it back to the front
+		}
+		else if (notification == TDN_HYPERLINK_CLICKED)
+		{
+			const std::wstring_view link(reinterpret_cast<const wchar_t*>(lParam));
+			if (link == L"repo")
+			{
+				OpenWithShell(std::format(L"https://github.com/{}", APPTRAY_REPOSITORY));
+			}
+			else if (link == L"data")
+			{
+				OpenWithShell(self->paths_.dataDirectory);
+			}
+		}
+		return S_OK;
 	}
 
 	// user.json "hotkey" (Ctrl+Alt+Space by default) opens and closes the launcher from any
@@ -877,18 +971,18 @@ namespace apptray
 			if (hotkeyWaiting_
 				&& RegisterHotKey(window_, LauncherHotkeyId, hotkeyWaiting_->modifiers | MOD_NOREPEAT, hotkeyWaiting_->key))
 			{
-				hotkeyLabel_ = FormatHotkey(*hotkeyWaiting_);
+				hotkeyActive_ = hotkeyWaiting_;
 				hotkeyWaiting_.reset();
-				WriteLog(L"hotkey registered: " + hotkeyLabel_);
+				WriteLog(L"hotkey registered: " + FormatHotkey(*hotkeyActive_, false));
 			}
 			return;
 		}
 		hotkeyTried_ = settings_.hotkey;
 		hotkeyWaiting_.reset();
-		if (!hotkeyLabel_.empty())
+		if (hotkeyActive_)
 		{
 			UnregisterHotKey(window_, LauncherHotkeyId);
-			hotkeyLabel_.clear();
+			hotkeyActive_.reset();
 		}
 		if (settings_.hotkey.empty())
 		{
@@ -897,13 +991,13 @@ namespace apptray
 		const std::optional<Hotkey> hotkey = ParseHotkey(settings_.hotkey);
 		if (!hotkey)
 		{
-			ReportError(text::HotkeyTitle, std::format(text::HotkeyInvalid, settings_.hotkey));
+			ReportError(text::HotkeyTitle, text::Format(text::HotkeyInvalid, settings_.hotkey));
 			return;
 		}
 		if (!RegisterHotKey(window_, LauncherHotkeyId, hotkey->modifiers | MOD_NOREPEAT, hotkey->key))
 		{
 			hotkeyWaiting_ = hotkey;
-			const std::wstring message = std::format(text::HotkeyTaken, FormatHotkey(*hotkey));
+			const std::wstring message = text::Format(text::HotkeyTaken, DescribeHotkey(*hotkey));
 			if (warn)
 			{
 				ReportError(text::HotkeyTitle, message);
@@ -914,7 +1008,7 @@ namespace apptray
 			}
 			return;
 		}
-		hotkeyLabel_ = FormatHotkey(*hotkey);
+		hotkeyActive_ = hotkey;
 	}
 
 	// At logon (after the delay): open the "always" apps that are not running, then offer the
@@ -942,7 +1036,7 @@ namespace apptray
 			if (item.entry->requiresAdmin && !item.elevatedTask)
 			{
 				WriteLog(L"logon: skipped " + item.name + L" (needs \"Abrir sin UAC\")");
-				trayIcon_.ShowNotification(text::LogonTitle, std::format(text::NeedsElevatedTask, item.name), true);
+				trayIcon_.ShowNotification(text::LogonTitle, text::Format(text::NeedsElevatedTask, item.name), true);
 				return;
 			}
 			const LaunchResult result = StartItem(item, false, true);
@@ -1069,7 +1163,7 @@ namespace apptray
 				}
 				else
 				{
-					ReportInfo(text::UpdateCheckTitle, std::format(text::UpToDate, APPTRAY_VERSION_WIDE));
+					ReportInfo(text::UpdateCheckTitle, text::Format(text::UpToDate, APPTRAY_VERSION_WIDE));
 				}
 			}
 		}
@@ -1099,7 +1193,7 @@ namespace apptray
 		newRelease_ = ReleaseInfo{state->latestVersion, state->url};
 		if (announce || state->notifiedVersion != state->latestVersion)
 		{
-			const std::wstring message = std::format(text::NewVersionText, state->latestVersion, APPTRAY_VERSION_WIDE);
+			const std::wstring message = text::Format(text::NewVersionText, state->latestVersion, APPTRAY_VERSION_WIDE);
 			if (announce)
 			{
 				ReportInfo(text::NewVersionTitle, message); // in the launcher's status line if it is open
@@ -1172,7 +1266,7 @@ namespace apptray
 			// A queued rescan (newer settings) still runs below; only a missing root drops it
 			ReportError(
 				text::RefreshFailed,
-				error.empty() ? std::format(L"código {} (detalles en AppTray.log)", exitCode) : error);
+				error.empty() ? text::Format(text::RefreshExitCode, exitCode) : error);
 			UpdateTip();
 			if (refreshAgain_)
 			{
@@ -1203,14 +1297,14 @@ namespace apptray
 		// One notification: a second one would replace the first while it is still on screen
 		if (newApps > 0)
 		{
-			const std::wstring newText = std::format(text::NewAppsText, newApps);
+			const std::wstring newText = text::Format(text::NewAppsText, newApps);
 			if (notice)
 			{
 				notice->text += L". " + newText;
 			}
 			else
 			{
-				notice = Notice{text::NewAppsTitle, newText, false};
+				notice = Notice{text::NewAppsTitle.Get(), newText, false};
 			}
 		}
 		if (notice)
@@ -1361,14 +1455,15 @@ namespace apptray
 		HMENU menu = CreatePopupMenu();
 		if (newRelease_)
 		{
-			const std::wstring label = std::format(text::NewVersionMenu, newRelease_->version);
+			const std::wstring label = text::Format(text::NewVersionMenu, newRelease_->version);
 			AppendMenuW(menu, MF_STRING, NewVersionCommand, label.c_str());
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		}
 		if (!fromLauncher)
 		{
-			const std::wstring openLabel = hotkeyLabel_.empty() ? std::wstring(text::OpenLauncher)
-																: std::format(L"{}\t{}", text::OpenLauncher, hotkeyLabel_);
+			const std::wstring openLabel = !hotkeyActive_
+				? std::wstring(text::OpenLauncher)
+				: std::format(L"{}\t{}", text::OpenLauncher, DescribeHotkey(*hotkeyActive_));
 			AppendMenuW(menu, MF_STRING, OpenLauncherCommand, openLabel.c_str());
 			SetMenuDefaultItem(menu, OpenLauncherCommand, FALSE);
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -1426,6 +1521,7 @@ namespace apptray
 		AppendMenuW(
 			menu, MF_STRING | (updateChecking_ ? MF_GRAYED : 0), CheckUpdateCommand,
 			updateChecking_ ? text::CheckingUpdate : text::CheckUpdate);
+		AppendMenuW(menu, MF_STRING | (aboutOpen_ ? MF_GRAYED : 0), AboutCommand, text::About);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, ExitCommand, text::Exit);
 
@@ -1480,6 +1576,10 @@ namespace apptray
 			break;
 		case CheckUpdateCommand:
 			CheckForUpdatesNow();
+			break;
+		case AboutCommand:
+			// Modal: run it from the tray window, not inside the launcher's button click
+			PostMessageW(window_, WM_APP_ABOUT, 0, 0);
 			break;
 		case ExitCommand:
 			// Posted: from the launcher's button this runs inside the launcher's own message
@@ -1585,6 +1685,15 @@ namespace apptray
 		switch (message)
 		{
 		case WM_APP_TRAY:
+			if (aboutWindow_ != nullptr)
+			{
+				// The About dialog is modal: the icon brings it to the front instead
+				if (LOWORD(lParam) == NIN_SELECT || LOWORD(lParam) == NIN_KEYSELECT || LOWORD(lParam) == WM_CONTEXTMENU)
+				{
+					SetForegroundWindow(aboutWindow_);
+				}
+				return 0;
+			}
 			switch (LOWORD(lParam))
 			{
 			case NIN_SELECT:
@@ -1641,10 +1750,20 @@ namespace apptray
 			}
 			return 0;
 		case WM_APP_SHOW:
-			ShowLauncher();
+			if (aboutWindow_ != nullptr)
+			{
+				SetForegroundWindow(aboutWindow_);
+			}
+			else
+			{
+				ShowLauncher();
+			}
 			return 0;
 		case WM_APP_EXIT:
 			DestroyWindow(window_);
+			return 0;
+		case WM_APP_ABOUT:
+			ShowAbout();
 			return 0;
 		case WM_INITMENUPOPUP:
 			FillCategoryMenu(reinterpret_cast<HMENU>(wParam));
@@ -1659,7 +1778,7 @@ namespace apptray
 		case WM_DESTROY:
 			exiting_ = true;
 			scanThread_.request_stop(); // the process ends now, not when a long scan finishes
-			if (!hotkeyLabel_.empty())
+			if (hotkeyActive_)
 			{
 				UnregisterHotKey(window_, LauncherHotkeyId);
 			}

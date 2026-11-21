@@ -5,6 +5,9 @@ works out which executable is the real program of each folder, and keeps a JSON 
 paths relative to the tree, so the whole folder can move to another drive. Click the tray icon
 to search, browse by category, keep favorites and launch.
 
+The interface is in Spanish when Windows is in Spanish and in English otherwise;
+`"language": "es"` or `"en"` in `user.json` forces one (`"auto"` is the default).
+
 > Status: **phase 4** — tray icon, launcher, tray menu, apps at logon, elevated apps without a
 > UAC prompt, a global hotkey, recent apps, search by initials, settings that follow an app to
 > its new version folder, shortcuts and app versions work.
@@ -54,7 +57,7 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 - **Ctrl+Alt+Space**, from any program: opens or closes the launcher. `"hotkey"` in `user.json`
 	changes it (`"Win+Shift+A"`, `"Ctrl+F12"`, Spanish names such as `"Mayús"` and `"Espacio"`
 	work too) or turns it off (`""`); it needs Ctrl, Alt or Win. The tray menu shows the active
-	one next to "Abrir AppTray". If another program holds the key, AppTray says so (only in the
+	one next to "Open AppTray". If another program holds the key, AppTray says so (only in the
 	log when started at logon, where a second AppTray copy would complain every time) and tries
 	again each time you open the menu or the launcher.
 - **Left click**: the launcher. Two search boxes, case and accents ignored:
@@ -81,7 +84,8 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 		one is named "Name (2)"; it starts the program directly, so an app with "Open without UAC"
 		shows its UAC prompt from there), what to do at logon, open without a UAC prompt.
 - **Right click**: favorites, the last 5 apps opened (other than favorites), categories as menus,
-	Refresh, Edit settings, Start with Windows, Check for a new version, Exit, and "New version …
+	Refresh, Edit settings, Start with Windows, Check for a new version, About (version, the
+	hotkey, links to this repository and to the data folder), Exit, and "New version …
 	available" when there is one.
 - The launcher closes when it loses focus and is destroyed then: idle, AppTray keeps only the
 	tray icon. Private memory is about 2.5 MB after start and settles around 5 MB once the
@@ -95,13 +99,13 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 "Start with Windows" (tray menu) adds `"…\AppTray.exe" --startup` to
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; no administrator needed. If the folder
 moves, the next start of AppTray fixes the value. With `--startup`, AppTray waits
-`startupDelaySeconds` (30) and then, for each app (right click › "Al iniciar sesión"):
-- **Abrir siempre** — opened, unless it is already running.
-- **Preguntar** — listed in a small dialog with a checkbox each and a countdown
+`startupDelaySeconds` (30) and then, for each app (right click › "At logon"):
+- **Always open** — opened, unless it is already running.
+- **Ask** — listed in a small dialog with a checkbox each and a countdown
 	(`startupPromptSeconds`, 15): when it ends the checked ones open. Touching a checkbox stops
-	the countdown. "Abrir" remembers the checks as next logon's defaults; "Ninguna" or closing
+	the countdown. "Open" remembers the checks as next logon's defaults; "None" or closing
 	opens nothing and changes nothing.
-- **No abrir** (default).
+- **Don't open** (default).
 
 "Already running" means a process whose executable is the app's (or, for folder apps such as
 PortableApps launchers, any executable inside the app's folder), so FirefoxPortable is not
@@ -111,7 +115,7 @@ have "Open without UAC".
 
 ### Open without UAC
 
-"Abrir sin UAC (tarea elevada)" creates a scheduled task in the `\AppTray` folder (named after
+"Open without UAC (elevated task)" creates a scheduled task in the `\AppTray` folder (named after
 the app's folder path plus a short hash) that runs the app elevated, with no trigger: AppTray
 starts it on demand, from the launcher or at logon, and Windows shows no UAC prompt. Creating
 or deleting the task takes one UAC prompt (AppTray runs an elevated copy of itself with
@@ -120,7 +124,7 @@ Windows setup); for a standard user the task cannot elevate.
 
 The task stores the executable and arguments of that moment. If they change (another
 executable chosen, a rescan that picks a new one, `args` edited), AppTray does not run the
-stale task: it opens the app normally and asks you to turn "Abrir sin UAC" off and on. At
+stale task: it opens the app normally and asks you to turn "Open without UAC" off and on. At
 logon it opens nothing rather than show a UAC prompt.
 
 Security: anyone who can write to the app's folder can replace its executable and get it run
@@ -138,7 +142,7 @@ follows to the same file in the new one if it exists there. "Open without UAC" i
 because the task runs the old executable: turn it on again. Every time AppTray creates or
 deletes a task (elevated anyway), it also deletes the `\AppTray` tasks whose program was in the
 tree and is gone, so the old one goes then. Anything less clear-cut (two new folders, another
-category) stays a new app plus a "no encontrada" one.
+category) stays a new app plus a "not found" one.
 
 ### New versions of AppTray
 
@@ -147,7 +151,7 @@ menu, AppTray asks GitHub for the latest release (a child `AppTray.exe --check-u
 HTTPS request, nothing else sent; offline, it tries again an hour later). A newer version shows a notification once and adds a
 "New version … available" entry at the top of the tray menu, which opens the release page.
 Nothing is downloaded or installed: replace `AppTray.exe` by hand (or with the deploy script).
-`"checkForUpdates": false` in `user.json` turns it off. "Comprobar nueva versión" in the menu
+`"checkForUpdates": false` in `user.json` turns it off. "Check for a new version" in the menu
 asks right away (even with `checkForUpdates` off) and always answers: up to date, a newer
 version, or GitHub unreachable.
 
@@ -185,7 +189,8 @@ exists (`--check-update`).
 	in the tray menu), AppTray reloads it when it changes and keeps unknown keys.
 	`"categoryDepth"` sets how many folder levels become categories: `0` (default) the whole
 	tree, `1` only the top-level folders (each holding all its apps), `2` one sublevel...
-	`"hotkey"` is the global shortcut (default `"Ctrl+Alt+Space"`, `""` = none).
+	`"hotkey"` is the global shortcut (default `"Ctrl+Alt+Space"`, `""` = none). `"language"`:
+	`"auto"` (Windows' language), `"es"` or `"en"`.
 	Per app, under `"apps"`: `"autostart": "always"|"ask"` (absent = no), `"askDefault"`
 	(checkbox state in the logon dialog), `"elevatedTask"` (set by "Open without UAC"; do not
 	set it by hand), `"args"`, `"target"`, `"hidden"`, `"name"`, `"category"`, `"expand"`.
