@@ -39,10 +39,17 @@ Put `AppTray.exe` in its own folder inside the tree it should list, e.g.
 `D:\Portable\AppTray\AppTray.exe`; the tree is the parent folder. Start it: an icon appears in
 the notification area (on Windows 11 it may start in the hidden overflow; drag it to the taskbar).
 
-- **Left click**: the launcher. Type to search (case and accents ignored), pick a category on
-	the left, Enter opens, Ctrl+Enter opens as administrator, Ctrl+D toggles a favorite,
-	Ctrl+E opens the folder, F5 rescans, Esc clears the search or closes. Right click an app for
-	more: another executable of the same app, show a suite's programs separately, hide, help.
+- **Left click**: the launcher. Two search boxes, case and accents ignored:
+	- **Folder search** (left, Ctrl+Shift+F) prunes the category tree to the folders whose path
+		contains every word ("audio edit" finds Media › Audio › Editor), keeping the folders
+		above each match open so its path shows, and picks the first match.
+	- **App search** (right, Ctrl+F) looks inside the chosen folder and its subfolders (from
+		Favorites, New or All it looks everywhere). Each app shows its folder path.
+	- Enter opens (from the folder side it moves to the apps), Ctrl+Enter opens as
+		administrator, Ctrl+D toggles a favorite, Ctrl+E opens the folder, F5 rescans, Esc clears
+		a search or closes, Tab moves between the boxes, the tree and the list. Typing in the tree
+		goes to the folder search, typing in the list to the app search. Right click an app for
+		more: another executable of the same app, show a suite's programs separately, hide, help.
 - **Right click**: favorites and categories as menus, Refresh, Edit settings, Exit.
 - The launcher closes when it loses focus and is destroyed then: idle, AppTray keeps only the
 	tray icon. Private memory is about 2.5 MB after start and settles around 5 MB once the

@@ -64,6 +64,14 @@ namespace apptray
 	// that many levels: deeper apps count in (and belong to) their ancestor at the last level.
 	CategoryNode BuildCategoryTree(const std::vector<AppItem>& items, int maxDepth = 0);
 
+	// True when the category path contains every word of the search (case and accents ignored,
+	// levels as words): "audio edit" matches "Media/Audio/Editor"
+	bool MatchesCategorySearch(std::wstring_view path, std::wstring_view search);
+
+	// Keeps the branches that match the search: a matching category keeps all its subcategories,
+	// and the categories above it stay so its path shows. An empty search keeps everything.
+	CategoryNode FilterCategoryTree(const CategoryNode& tree, std::wstring_view search);
+
 	// Counts for the fixed filters, to show or hide them in the UI
 	size_t CountAppItems(const std::vector<AppItem>& items, AppFilterKind kind);
 }

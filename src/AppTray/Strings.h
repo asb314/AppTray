@@ -17,6 +17,8 @@ namespace apptray::text
 
 	// Launcher window
 	inline constexpr wchar_t SearchCue[] = L"Buscar apps";
+	inline constexpr wchar_t FolderSearchCue[] = L"Buscar carpeta";
+	inline constexpr wchar_t NoFolderMatches[] = L"Ninguna carpeta coincide";
 	inline constexpr wchar_t Favorites[] = L"Favoritos";
 	inline constexpr wchar_t All[] = L"Todas";
 	inline constexpr wchar_t New[] = L"Nuevas";
@@ -27,7 +29,8 @@ namespace apptray::text
 	inline constexpr wchar_t NotFound[] = L"no encontrada";
 	inline constexpr wchar_t NewTag[] = L"nueva";
 	inline constexpr wchar_t NoMatches[] = L"Nada coincide con la búsqueda";
-	inline constexpr wchar_t Keys[] = L"Intro abre · Ctrl+Intro como admin · Ctrl+D favorito · F5 refrescar";
+	inline constexpr wchar_t Keys[] =
+		L"Intro abre · Ctrl+Intro como admin · Ctrl+D favorito · Ctrl+Mayús+F carpetas · F5 refrescar";
 
 	// App context menu
 	inline constexpr wchar_t Open[] = L"Abrir";

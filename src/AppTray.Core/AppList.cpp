@@ -235,6 +235,64 @@ namespace apptray
 		return root;
 	}
 
+	bool MatchesCategorySearch(std::wstring_view path, std::wstring_view search)
+	{
+		// Levels are words on both sides: "media/audio" and "media audio" search the same
+		std::wstring levels(search);
+		std::replace(levels.begin(), levels.end(), L'/', L' ');
+		std::replace(levels.begin(), levels.end(), L'\\', L' ');
+		const std::vector<std::wstring> words = SplitSearchWords(levels);
+		if (words.empty())
+		{
+			return true;
+		}
+		std::wstring folded = FoldForSearch(path);
+		std::replace(folded.begin(), folded.end(), L'/', L' ');
+		return std::all_of(
+			words.begin(), words.end(), [&](const std::wstring& word) { return folded.find(word) != std::wstring::npos; });
+	}
+
+	namespace
+	{
+		std::optional<CategoryNode> PruneCategory(const CategoryNode& node, std::wstring_view search)
+		{
+			if (MatchesCategorySearch(node.path, search))
+			{
+				return node; // with everything below it
+			}
+			CategoryNode kept{node.path, node.name, node.count, {}};
+			for (const CategoryNode& child : node.children)
+			{
+				if (std::optional<CategoryNode> prunedChild = PruneCategory(child, search))
+				{
+					kept.children.push_back(std::move(*prunedChild));
+				}
+			}
+			if (kept.children.empty())
+			{
+				return std::nullopt;
+			}
+			return kept;
+		}
+	}
+
+	CategoryNode FilterCategoryTree(const CategoryNode& tree, std::wstring_view search)
+	{
+		if (SplitSearchWords(search).empty())
+		{
+			return tree;
+		}
+		CategoryNode result{tree.path, tree.name, tree.count, {}};
+		for (const CategoryNode& child : tree.children)
+		{
+			if (std::optional<CategoryNode> kept = PruneCategory(child, search))
+			{
+				result.children.push_back(std::move(*kept));
+			}
+		}
+		return result;
+	}
+
 	size_t CountAppItems(const std::vector<AppItem>& items, AppFilterKind kind)
 	{
 		AppFilter filter;

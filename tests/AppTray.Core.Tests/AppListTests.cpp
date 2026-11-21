@@ -161,6 +161,44 @@ TEST(AppList, Should_CutCategoryTreeAtMaxDepth)
 	EXPECT_EQ(BuildCategoryTree(items).children[0].children[0].children.size(), 1u); // all levels
 }
 
+TEST(AppList, Should_PruneCategoryTreeKeepingPathsAndSubtrees)
+{
+	Catalog catalog;
+	catalog.apps = {
+		MakeEntry(L"Media/Audio/Editor/Wave", L"Media/Audio/Editor", L"Wave"),
+		MakeEntry(L"Media/Audio/Tags/Tag", L"Media/Audio/Tags", L"Tag"),
+		MakeEntry(L"Media/Video/Editor/Cut", L"Media/Video/Editor", L"Cut"),
+		MakeEntry(L"Editor/LaTeX/TeX", L"Editor/LaTeX", L"TeX"),
+		MakeEntry(L"Utils/Zip", L"Utils", L"Zip"),
+	};
+	const CategoryNode tree = BuildCategoryTree(BuildAppItems(catalog, {}, L"2026-11-21T10:00:00Z"));
+
+	const CategoryNode edit = FilterCategoryTree(tree, L"EDIT");
+	ASSERT_EQ(edit.children.size(), 2u); // Editor (matches) and Media (holds matches); not Utils
+	EXPECT_EQ(edit.children[0].path, L"Editor");
+	ASSERT_EQ(edit.children[0].children.size(), 1u); // a matching category keeps its subcategories
+	EXPECT_EQ(edit.children[0].children[0].path, L"Editor/LaTeX");
+	const CategoryNode& media = edit.children[1];
+	ASSERT_EQ(media.children.size(), 2u); // Audio and Video, each only with its Editor
+	EXPECT_EQ(media.children[0].children.size(), 1u);
+	EXPECT_EQ(media.children[0].children[0].path, L"Media/Audio/Editor");
+
+	// Words across levels: only the audio editor
+	const CategoryNode audioEditor = FilterCategoryTree(tree, L"audio edit");
+	ASSERT_EQ(audioEditor.children.size(), 1u);
+	ASSERT_EQ(audioEditor.children[0].children.size(), 1u);
+	ASSERT_EQ(audioEditor.children[0].children[0].children.size(), 1u);
+	EXPECT_EQ(audioEditor.children[0].children[0].children[0].path, L"Media/Audio/Editor");
+
+	// Written as a path, with either slash
+	EXPECT_EQ(FilterCategoryTree(tree, L"media/audio").children.size(), 1u);
+	EXPECT_TRUE(MatchesCategorySearch(L"Media/Audio/Editor", L"Media\\Audio"));
+
+	EXPECT_TRUE(FilterCategoryTree(tree, L"nothing-like-this").children.empty());
+	EXPECT_EQ(FilterCategoryTree(tree, L"  ").children.size(), tree.children.size());
+	EXPECT_TRUE(MatchesCategorySearch(L"Música/Edición", L"musica edicion"));
+}
+
 TEST(UserSettings, Should_ToggleFavoritesAndDropEmptyOverrides)
 {
 	UserSettings settings;

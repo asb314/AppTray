@@ -86,10 +86,12 @@ namespace apptray
 
 		TrayApp& app_;
 		HWND window_ = nullptr;
-		HWND search_ = nullptr;
+		HWND folderSearch_ = nullptr; // filters the category tree
+		HWND search_ = nullptr;       // filters the apps
 		HWND tree_ = nullptr;
 		HWND list_ = nullptr;
 		HWND status_ = nullptr;
+		RECT folderFrame_{};
 		RECT searchFrame_{};
 		UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
 		Theme theme_;
@@ -104,7 +106,9 @@ namespace apptray
 		std::vector<std::wstring> expandedCategories_; // open branches, kept while AppTray runs
 		bool populatingTree_ = false;
 		AppFilter filter_;
-		bool filterChosen_ = false;
+		std::wstring folderFilter_;        // text of the folder search box, trimmed
+		bool folderFilterChanged_ = false; // the text changed: pick the first matching folder
+		bool noFolderMatch_ = false;
 		std::vector<size_t> visible_;
 		std::wstring selectedId_; // survives a rebuild of the items (indices do not)
 		std::wstring statusOverride_;

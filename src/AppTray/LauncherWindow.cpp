@@ -28,6 +28,7 @@ namespace apptray
 		constexpr int NameColumnPercent = 55;
 
 		constexpr int SearchId = 101;
+		constexpr int FolderSearchId = 105;
 		constexpr int TreeId = 102;
 		constexpr int ListId = 103;
 		constexpr int StatusId = 104;
@@ -201,13 +202,13 @@ namespace apptray
 		}
 		dpi_ = GetDpiForWindow(window_);
 
-		if (!filterChosen_)
-		{
-			filter_.kind = CountAppItems(app_.Items(), AppFilterKind::Favorites) > 0 ? AppFilterKind::Favorites
-																					 : AppFilterKind::All;
-			filterChosen_ = true;
-		}
+		// Each opening starts fresh: both searches empty, at Favorites (or All), so typing a name
+		// right away searches every app and never a folder left from the last time
+		filter_.kind = CountAppItems(app_.Items(), AppFilterKind::Favorites) > 0 ? AppFilterKind::Favorites
+																				 : AppFilterKind::All;
+		filter_.category.clear();
 		filter_.search.clear();
+		folderFilter_.clear();
 		statusOverride_.clear();
 		wasActive_ = false;
 
@@ -244,6 +245,11 @@ namespace apptray
 	void LauncherWindow::CreateChildren()
 	{
 		const HINSTANCE instance = app_.Instance();
+		folderSearch_ = CreateWindowExW(
+			0, WC_EDITW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, window_,
+			reinterpret_cast<HMENU>(static_cast<INT_PTR>(FolderSearchId)), instance, nullptr);
+		SendMessageW(folderSearch_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(text::FolderSearchCue));
+
 		search_ = CreateWindowExW(
 			0, WC_EDITW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0, window_,
 			reinterpret_cast<HMENU>(static_cast<INT_PTR>(SearchId)), instance, nullptr);
@@ -297,7 +303,10 @@ namespace apptray
 		{
 			SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font_.get()), TRUE);
 		}
-		SendMessageW(search_, WM_SETFONT, reinterpret_cast<WPARAM>(searchFont_.get()), TRUE);
+		for (HWND box : {folderSearch_, search_})
+		{
+			SendMessageW(box, WM_SETFONT, reinterpret_cast<WPARAM>(searchFont_.get()), TRUE);
+		}
 		TreeView_SetItemHeight(tree_, Scale(26));
 	}
 
@@ -330,9 +339,14 @@ namespace apptray
 		RECT client{};
 		GetClientRect(window_, &client);
 		const int padding = Scale(Padding);
-		searchFrame_ = {padding, padding, client.right - padding, padding + Scale(SearchHeight)};
+		const int treeRight = padding + Scale(TreeWidth);
+		const int listLeft = treeRight + Scale(Gap);
+		const int listWidth = client.right - padding - listLeft;
+		// Folder search above the tree, app search above the list
+		folderFrame_ = {padding, padding, treeRight, padding + Scale(SearchHeight)};
+		searchFrame_ = {listLeft, padding, client.right - padding, padding + Scale(SearchHeight)};
 
-		// The edit box sits inside the rounded frame painted by the window, vertically centered
+		// Each edit box sits inside the rounded frame painted by the window, vertically centered
 		int editHeight = Scale(22);
 		if (HDC dc = GetDC(search_))
 		{
@@ -344,18 +358,18 @@ namespace apptray
 			editHeight = metrics.tmHeight + Scale(2);
 		}
 		const int inner = Scale(10);
-		const int frameHeight = searchFrame_.bottom - searchFrame_.top;
-		MoveWindow(
-			search_, searchFrame_.left + inner, searchFrame_.top + (frameHeight - editHeight) / 2,
-			searchFrame_.right - searchFrame_.left - 2 * inner, editHeight, TRUE);
+		for (const auto& [box, frame] : {std::pair{folderSearch_, folderFrame_}, std::pair{search_, searchFrame_}})
+		{
+			const int frameHeight = frame.bottom - frame.top;
+			MoveWindow(
+				box, frame.left + inner, frame.top + (frameHeight - editHeight) / 2, frame.right - frame.left - 2 * inner,
+				editHeight, TRUE);
+		}
 
 		const int top = searchFrame_.bottom + Scale(Gap);
 		const int statusTop = client.bottom - padding / 2 - Scale(StatusHeight);
 		const int bottom = statusTop - Scale(4);
-		const int treeRight = padding + Scale(TreeWidth);
 		MoveWindow(tree_, padding, top, treeRight - padding, bottom - top, TRUE);
-		const int listLeft = treeRight + Scale(Gap);
-		const int listWidth = client.right - padding - listLeft;
 		MoveWindow(list_, listLeft, top, listWidth, bottom - top, TRUE);
 		MoveWindow(status_, padding + Scale(4), statusTop, client.right - 2 * padding - Scale(4), Scale(StatusHeight), TRUE);
 
@@ -374,7 +388,10 @@ namespace apptray
 		HGDIOBJ oldPen = SelectObject(dc, pen.get());
 		HGDIOBJ oldBrush = SelectObject(dc, theme_.SurfaceBrush());
 		const int radius = Scale(8);
-		RoundRect(dc, searchFrame_.left, searchFrame_.top, searchFrame_.right, searchFrame_.bottom, radius, radius);
+		for (const RECT& frame : {folderFrame_, searchFrame_})
+		{
+			RoundRect(dc, frame.left, frame.top, frame.right, frame.bottom, radius, radius);
+		}
 		SelectObject(dc, oldBrush);
 		SelectObject(dc, oldPen);
 		EndPaint(window_, &paint);
@@ -402,11 +419,15 @@ namespace apptray
 			filter.category = child.path;
 			const HTREEITEM item = AddTreeNode(parent, std::format(L"{}  ({})", child.name, child.count), filter);
 			AddCategoryNodes(item, child);
-			if (std::any_of(
-					expandedCategories_.begin(), expandedCategories_.end(),
-					[&](const std::wstring& path) { return EqualsIgnoreCase(path, child.path); }))
+			// While filtering folders, the folders above a match open so its path shows; a match
+			// itself stays closed (its subfolders are one click away) to keep the list short
+			const bool wasOpen = std::any_of(
+				expandedCategories_.begin(), expandedCategories_.end(),
+				[&](const std::wstring& path) { return EqualsIgnoreCase(path, child.path); });
+			const bool open = folderFilter_.empty() ? wasOpen : !MatchesCategorySearch(child.path, folderFilter_);
+			if (open)
 			{
-				TreeView_Expand(tree_, item, TVE_EXPAND); // as the user left it
+				TreeView_Expand(tree_, item, TVE_EXPAND);
 			}
 		}
 	}
@@ -417,11 +438,12 @@ namespace apptray
 		TreeView_DeleteAllItems(tree_);
 		treeFilters_.clear();
 		const std::vector<AppItem>& items = app_.Items();
+		const bool filteringFolders = !folderFilter_.empty();
 
 		const auto addFixed = [&](AppFilterKind kind, const wchar_t* label, bool always)
 		{
 			const size_t count = CountAppItems(items, kind);
-			if (always || count > 0)
+			if (!filteringFolders && (always || count > 0))
 			{
 				AppFilter filter;
 				filter.kind = kind;
@@ -431,7 +453,8 @@ namespace apptray
 		addFixed(AppFilterKind::Favorites, text::Favorites, true);
 		addFixed(AppFilterKind::All, text::All, true);
 		addFixed(AppFilterKind::New, text::New, false);
-		AddCategoryNodes(TVI_ROOT, BuildCategoryTree(items, app_.Settings().categoryDepth));
+		AddCategoryNodes(
+			TVI_ROOT, FilterCategoryTree(BuildCategoryTree(items, app_.Settings().categoryDepth), folderFilter_));
 		addFixed(AppFilterKind::Installers, text::InstallersAndCopies, false);
 		addFixed(AppFilterKind::Hidden, text::Hidden, false);
 
@@ -441,6 +464,7 @@ namespace apptray
 		HTREEITEM ancestor = nullptr;
 		size_t ancestorLength = 0;
 		HTREEITEM all = nullptr;
+		HTREEITEM firstMatch = nullptr; // first folder that matches the folder search itself
 		const auto visit = [&](auto& self, HTREEITEM item) -> void
 		{
 			for (; item != nullptr; item = TreeView_GetNextSibling(tree_, item))
@@ -453,6 +477,11 @@ namespace apptray
 				if (selected == nullptr && IsSameFilter(filter, filter_))
 				{
 					selected = item;
+				}
+				if (filteringFolders && firstMatch == nullptr && filter.kind == AppFilterKind::Category
+					&& MatchesCategorySearch(filter.category, folderFilter_))
+				{
+					firstMatch = item;
 				}
 				if (filter.kind == AppFilterKind::Category && filter_.kind == AppFilterKind::Category
 					&& filter.category.size() > ancestorLength
@@ -469,23 +498,44 @@ namespace apptray
 			}
 		};
 		visit(visit, TreeView_GetRoot(tree_));
-		if (selected == nullptr && ancestor != nullptr)
+		const auto categoryOf = [&](HTREEITEM item)
 		{
-			selected = ancestor;
 			TVITEMW data{};
 			data.mask = TVIF_PARAM;
-			data.hItem = ancestor;
+			data.hItem = item;
 			TreeView_GetItem(tree_, &data);
-			filter_.category = treeFilters_[static_cast<size_t>(data.lParam)].category;
+			return treeFilters_[static_cast<size_t>(data.lParam)].category;
+		};
+		noFolderMatch_ = false;
+		if (filteringFolders)
+		{
+			// Typing a folder name picks the first folder that matches, so its apps show at once;
+			// a folder the user picked meanwhile stays picked through refreshes and favorite changes
+			if (folderFilterChanged_ || selected == nullptr || filter_.kind != AppFilterKind::Category)
+			{
+				selected = firstMatch;
+				filter_.kind = AppFilterKind::Category;
+				filter_.category = firstMatch != nullptr ? categoryOf(firstMatch) : std::wstring{};
+			}
+			noFolderMatch_ = firstMatch == nullptr;
+			folderFilterChanged_ = false;
 		}
-		if (selected == nullptr)
+		else if (selected == nullptr && ancestor != nullptr)
+		{
+			selected = ancestor;
+			filter_.category = categoryOf(ancestor);
+		}
+		else if (selected == nullptr)
 		{
 			selected = all;
 			filter_.kind = AppFilterKind::All;
 			filter_.category.clear();
 		}
-		TreeView_SelectItem(tree_, selected);
-		TreeView_EnsureVisible(tree_, selected);
+		if (selected != nullptr)
+		{
+			TreeView_SelectItem(tree_, selected);
+			TreeView_EnsureVisible(tree_, selected);
+		}
 		populatingTree_ = false;
 	}
 
@@ -493,15 +543,21 @@ namespace apptray
 	{
 		const std::vector<AppItem>& items = app_.Items();
 		AppFilter effective = filter_;
-		// Typing searches everything, unless browsing hidden apps or installers
+		// The app search stays inside the chosen folder (or hidden apps, or installers); from
+		// Favorites or New it looks everywhere, so typing a name right after opening finds it
 		if (!effective.search.empty()
-			&& (effective.kind == AppFilterKind::Favorites || effective.kind == AppFilterKind::New
-				|| effective.kind == AppFilterKind::Category))
+			&& (effective.kind == AppFilterKind::Favorites || effective.kind == AppFilterKind::New))
+		{
+			effective.kind = AppFilterKind::All;
+		}
+		// No folder matches: the app search (if any) looks everywhere instead of showing nothing
+		if (noFolderMatch_ && !effective.search.empty())
 		{
 			effective.kind = AppFilterKind::All;
 			effective.category.clear();
 		}
-		visible_ = FilterAppItems(items, effective, app_.Settings().favorites);
+		visible_ = noFolderMatch_ && effective.search.empty() ? std::vector<size_t>{}
+															  : FilterAppItems(items, effective, app_.Settings().favorites);
 		// Icons of rows no longer shown wait behind: drop them so the visible ones come first
 		if (iconWorker_)
 		{
@@ -586,6 +642,10 @@ namespace apptray
 			const std::wstring what = item.entry->description.empty() ? item.name : item.entry->description;
 			const std::wstring where = item.target.empty() ? std::wstring(text::OpensFolder) : item.target;
 			text = std::format(L"{}  ·  {}", what, where);
+		}
+		else if (noFolderMatch_)
+		{
+			text = text::NoFolderMatches;
 		}
 		else if (!filter_.search.empty())
 		{
@@ -835,7 +895,7 @@ namespace apptray
 
 	LRESULT LauncherWindow::OnNotify(const NMHDR* header)
 	{
-		if (header->hwndFrom == tree_ && header->code == TVN_ITEMEXPANDEDW && !populatingTree_)
+		if (header->hwndFrom == tree_ && header->code == TVN_ITEMEXPANDEDW && !populatingTree_ && folderFilter_.empty())
 		{
 			// Remember open branches for the next time the tree is filled (window reopened, refresh)
 			const auto* change = reinterpret_cast<const NMTREEVIEWW*>(header);
@@ -923,7 +983,7 @@ namespace apptray
 
 	void LauncherWindow::CycleFocus(bool backwards)
 	{
-		const HWND order[] = {search_, list_, tree_};
+		const HWND order[] = {folderSearch_, tree_, search_, list_};
 		const HWND focus = GetFocus();
 		size_t current = 0;
 		for (size_t i = 0; i < std::size(order); ++i)
@@ -948,13 +1008,23 @@ namespace apptray
 			const bool control = IsKeyDown(VK_CONTROL);
 			const bool shift = IsKeyDown(VK_SHIFT);
 			const bool inSearch = message.hwnd == search_;
+			const bool inFolderSearch = message.hwnd == folderSearch_;
 			switch (message.wParam)
 			{
 			case VK_ESCAPE:
-				if (GetWindowTextLengthW(search_) > 0)
+				// Clears the box being typed in first, then the other, then closes
+				if (inFolderSearch && GetWindowTextLengthW(folderSearch_) > 0)
+				{
+					SetWindowTextW(folderSearch_, L"");
+				}
+				else if (GetWindowTextLengthW(search_) > 0)
 				{
 					SetWindowTextW(search_, L"");
 					FocusSearch();
+				}
+				else if (GetWindowTextLengthW(folderSearch_) > 0)
+				{
+					SetWindowTextW(folderSearch_, L"");
 				}
 				else
 				{
@@ -962,10 +1032,33 @@ namespace apptray
 				}
 				return true;
 			case VK_RETURN:
-				LaunchSelected(control);
+				// From the folder side, Enter moves on to the apps of the chosen folder
+				if ((inFolderSearch || message.hwnd == tree_) && !control)
+				{
+					SetFocus(visible_.empty() ? search_ : list_);
+				}
+				else
+				{
+					LaunchSelected(control);
+				}
 				return true;
 			case VK_DOWN:
 			case VK_UP:
+				if (inFolderSearch)
+				{
+					// Walk the (pruned, open) tree without leaving the folder box
+					const HTREEITEM current = TreeView_GetSelection(tree_);
+					const HTREEITEM next = current == nullptr
+						? TreeView_GetRoot(tree_)
+						: (message.wParam == VK_DOWN ? TreeView_GetNextVisible(tree_, current)
+													 : TreeView_GetPrevVisible(tree_, current));
+					if (next != nullptr)
+					{
+						TreeView_SelectItem(tree_, next);
+					}
+					return true;
+				}
+				[[fallthrough]];
 			case VK_PRIOR:
 			case VK_NEXT:
 				if (inSearch)
@@ -999,6 +1092,12 @@ namespace apptray
 				CycleFocus(shift);
 				return true;
 			case 'F':
+				if (control && shift)
+				{
+					SetFocus(folderSearch_);
+					SendMessageW(folderSearch_, EM_SETSEL, 0, -1);
+					return true;
+				}
 				if (control)
 				{
 					FocusSearch();
@@ -1029,13 +1128,14 @@ namespace apptray
 				return false;
 			}
 		}
-		// Typing in the list or the tree goes to the search box
+		// Typing in the tree goes to the folder search, typing in the list to the app search
 		if (message.message == WM_CHAR && (message.hwnd == list_ || message.hwnd == tree_)
 			&& (message.wParam >= L' ' || message.wParam == VK_BACK))
 		{
-			SetFocus(search_);
-			SendMessageW(search_, EM_SETSEL, static_cast<WPARAM>(-1), -1);
-			SendMessageW(search_, WM_CHAR, message.wParam, message.lParam);
+			const HWND box = message.hwnd == tree_ ? folderSearch_ : search_;
+			SetFocus(box);
+			SendMessageW(box, EM_SETSEL, static_cast<WPARAM>(-1), -1);
+			SendMessageW(box, WM_CHAR, message.wParam, message.lParam);
 			return true;
 		}
 		return false;
@@ -1070,7 +1170,7 @@ namespace apptray
 		if (window_ != nullptr)
 		{
 			ApplyTheme();
-			for (HWND control : {search_, tree_, list_, status_})
+			for (HWND control : {folderSearch_, search_, tree_, list_, status_})
 			{
 				InvalidateRect(control, nullptr, TRUE);
 			}
@@ -1132,6 +1232,15 @@ namespace apptray
 			return reinterpret_cast<LRESULT>(theme_.WindowBrush());
 		}
 		case WM_COMMAND:
+			if (reinterpret_cast<HWND>(lParam) == folderSearch_ && HIWORD(wParam) == EN_CHANGE)
+			{
+				folderFilter_ = Trim(GetWindowTextString(folderSearch_)); // spaces alone filter nothing
+				folderFilterChanged_ = true;
+				statusOverride_.clear();
+				PopulateTree();
+				ApplyFilter();
+				return 0;
+			}
 			if (reinterpret_cast<HWND>(lParam) == search_ && HIWORD(wParam) == EN_CHANGE)
 			{
 				filter_.search = GetWindowTextString(search_);
@@ -1199,7 +1308,7 @@ namespace apptray
 			treeFilters_.shrink_to_fit();
 			font_.reset();
 			searchFont_.reset();
-			search_ = tree_ = list_ = status_ = nullptr;
+			folderSearch_ = search_ = tree_ = list_ = status_ = nullptr;
 			window_ = nullptr;
 			closedAt_ = GetTickCount64();
 			return 0;

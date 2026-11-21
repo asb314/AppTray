@@ -20,7 +20,7 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 |---|---|
 | `main.cpp` | Entry point: `--scan` (console output), single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
 | `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes), tray menu (category submenus filled on `WM_INITMENUPOPUP`), background refresh, actions on apps |
-| `LauncherWindow` | The flyout: search box, category tree, owner-data list view; created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
+| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`), app search over an owner-data list view (scoped to the chosen folder); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
 | `TrayIcon` | `Shell_NotifyIcon` v4: add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
