@@ -14,6 +14,8 @@ namespace apptray::text
 	inline constexpr wchar_t Refreshing[] = L"Refrescando…";
 	inline constexpr wchar_t EditSettings[] = L"Editar configuración";
 	inline constexpr wchar_t StartWithWindows[] = L"Iniciar con Windows";
+	inline constexpr wchar_t CheckUpdate[] = L"Comprobar nueva versión";
+	inline constexpr wchar_t CheckingUpdate[] = L"Comprobando versión…";
 	inline constexpr wchar_t NewVersionMenu[] = L"Nueva versión {} disponible…";
 	inline constexpr wchar_t Exit[] = L"Salir";
 
@@ -32,8 +34,7 @@ namespace apptray::text
 	inline constexpr wchar_t NotFound[] = L"no encontrada";
 	inline constexpr wchar_t NewTag[] = L"nueva";
 	inline constexpr wchar_t NoMatches[] = L"Nada coincide con la búsqueda";
-	inline constexpr wchar_t Keys[] =
-		L"Intro abre · Ctrl+Intro como admin · Ctrl+D favorito · Ctrl+Mayús+F carpetas · F5 refrescar";
+	inline constexpr wchar_t Keys[] = L"Intro abre · Ctrl+Intro admin · Ctrl+D favorito · F5 refrescar · F10 menú";
 
 	// App context menu
 	inline constexpr wchar_t Open[] = L"Abrir";
@@ -73,6 +74,11 @@ namespace apptray::text
 		L"la tarea elevada sigue abriendo el ejecutable anterior: desactiva y activa «Abrir sin UAC»";
 	inline constexpr wchar_t NewVersionTitle[] = L"Nueva versión de AppTray";
 	inline constexpr wchar_t NewVersionText[] = L"La {} está disponible (tienes la {}). Menú del icono → Nueva versión.";
+	inline constexpr wchar_t UpdateCheckTitle[] = L"Versión de AppTray";
+	inline constexpr wchar_t UpToDate[] = L"Tienes la última versión ({})";
+	inline constexpr wchar_t UpdateCheckFailed[] = L"No se pudo consultar GitHub (detalles en AppTray.log)";
+	inline constexpr wchar_t UpdateNotSaved[] =
+		L"Hay una versión nueva en GitHub, pero no se pudo guardar update.json (detalles en AppTray.log)";
 	inline constexpr wchar_t LogonTitle[] = L"Inicio de sesión";
 	inline constexpr wchar_t ShortcutCreatedTitle[] = L"Acceso directo creado";
 	inline constexpr wchar_t ShortcutCreatedDesktop[] = L"Acceso directo a {} creado en el escritorio";

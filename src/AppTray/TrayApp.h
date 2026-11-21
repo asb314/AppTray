@@ -71,6 +71,12 @@ namespace apptray
 			return scanning_;
 		}
 
+		// The tray icon's menu. owner: the launcher window when its menu button opens it (the
+		// launcher stays open and forwards WM_INITMENUPOPUP to FillCategoryMenu); nullptr from the
+		// tray icon. exclude: the button, in screen coordinates, which the menu must not cover.
+		void ShowTrayMenu(POINT point, HWND owner = nullptr, const RECT* exclude = nullptr);
+		void FillCategoryMenu(HMENU menu);
+
 		void LaunchItem(size_t index, bool asAdmin);
 		void OpenItemFolder(size_t index);
 		void OpenItemReadme(size_t index);
@@ -124,8 +130,6 @@ namespace apptray
 		void UpdateTip();
 		void ToggleLauncher();
 		void ShowLauncher();
-		void ShowTrayMenu(POINT point);
-		void FillCategoryMenu(HMENU menu);
 		void AppendAppMenuItem(HMENU menu, size_t index, UINT id);
 		HBITMAP GetMenuBitmap(size_t index);
 		void OpenSettingsFile();
@@ -136,8 +140,9 @@ namespace apptray
 		void RunLogonApps();
 		void ToggleStartWithWindows();
 		void CheckForUpdates();
+		void CheckForUpdatesNow();
 		void OnUpdateCheckDone(DWORD exitCode);
-		void ApplyUpdateState();
+		void ApplyUpdateState(bool announce);
 		void OnElevatedTaskDone(DWORD exitCode);
 		void OnShortcutDone(DWORD exitCode);
 		void RegisterLauncherHotkey(bool warn);
@@ -177,6 +182,7 @@ namespace apptray
 
 		std::jthread updateThread_;            // waits for "AppTray.exe --check-update"
 		bool updateChecking_ = false;
+		bool manualUpdateCheck_ = false;       // "Comprobar nueva versión": always report the answer
 		ULONGLONG nextUpdateCheck_ = 0;        // GetTickCount64 from which a check is due
 		std::optional<ReleaseInfo> newRelease_; // newer than this AppTray
 

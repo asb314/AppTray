@@ -72,15 +72,17 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 	- Enter opens (from the folder side it moves to the apps), Ctrl+Enter opens as
 		administrator, Ctrl+D toggles a favorite, Ctrl+E opens the folder, F5 rescans, Esc clears
 		a search or closes, Tab moves between the boxes, the tree and the list. Typing in the tree
-		goes to the folder search, typing in the list to the app search. Right click an app for
+		goes to the folder search, typing in the list to the app search. The button at the top
+		right (or F10) opens the tray icon's menu (Refresh, Edit settings, Exit...) without
+		leaving the launcher. Right click an app for
 		more: another executable of the same app, show a suite's programs separately, hide, help,
 		a shortcut on the desktop or in the Start menu (`Programs\AppTray`, so Windows search
 		finds the app; a shortcut of the same name that opens something else is kept and the new
 		one is named "Name (2)"; it starts the program directly, so an app with "Open without UAC"
 		shows its UAC prompt from there), what to do at logon, open without a UAC prompt.
 - **Right click**: favorites, the last 5 apps opened (other than favorites), categories as menus,
-	Refresh, Edit settings, Start with Windows, Exit, and "New version … available" when there
-	is one.
+	Refresh, Edit settings, Start with Windows, Check for a new version, Exit, and "New version …
+	available" when there is one.
 - The launcher closes when it loses focus and is destroyed then: idle, AppTray keeps only the
 	tray icon. Private memory is about 2.5 MB after start and settles around 5 MB once the
 	launcher has been used (common controls and theme data stay loaded); no CPU, no timers, no
@@ -145,7 +147,9 @@ menu, AppTray asks GitHub for the latest release (a child `AppTray.exe --check-u
 HTTPS request, nothing else sent; offline, it tries again an hour later). A newer version shows a notification once and adds a
 "New version … available" entry at the top of the tray menu, which opens the release page.
 Nothing is downloaded or installed: replace `AppTray.exe` by hand (or with the deploy script).
-`"checkForUpdates": false` in `user.json` turns it off.
+`"checkForUpdates": false` in `user.json` turns it off. "Comprobar nueva versión" in the menu
+asks right away (even with `checkForUpdates` off) and always answers: up to date, a newer
+version, or GitHub unreachable.
 
 Command line:
 

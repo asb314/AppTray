@@ -210,7 +210,10 @@ namespace
 		state.checkedAt = FormatUtcNow();
 		state.latestVersion = release ? release->version : std::wstring{};
 		state.url = release ? release->url : std::wstring{};
-		SaveUpdateState(stateFile, state, error);
+		if (!SaveUpdateState(stateFile, state, error))
+		{
+			WriteLog(L"update check: " + error); // the tray reads the answer from that file
+		}
 		const bool newer = release && CompareVersions(release->version, APPTRAY_VERSION_WIDE) > 0;
 		WriteLog(std::format(
 			L"update check: latest {}, running {}", release ? release->version : L"(none)", APPTRAY_VERSION_WIDE));

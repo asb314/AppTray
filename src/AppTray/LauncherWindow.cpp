@@ -26,6 +26,7 @@ namespace apptray
 		constexpr int StatusHeight = 24;
 		constexpr int Gap = 8;
 		constexpr int NameColumnPercent = 55;
+		constexpr wchar_t MenuGlyph[] = L"\xE700"; // GlobalNavigationButton (three lines)
 
 		constexpr int SearchId = 101;
 		constexpr int FolderSearchId = 105;
@@ -313,6 +314,9 @@ namespace apptray
 		{
 			SendMessageW(box, WM_SETFONT, reinterpret_cast<WPARAM>(searchFont_.get()), TRUE);
 		}
+		iconFont_.reset(CreateFontW(
+			-Scale(16), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+			CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe MDL2 Assets"));
 		TreeView_SetItemHeight(tree_, Scale(26));
 	}
 
@@ -348,9 +352,11 @@ namespace apptray
 		const int treeRight = padding + Scale(TreeWidth);
 		const int listLeft = treeRight + Scale(Gap);
 		const int listWidth = client.right - padding - listLeft;
-		// Folder search above the tree, app search above the list
-		folderFrame_ = {padding, padding, treeRight, padding + Scale(SearchHeight)};
-		searchFrame_ = {listLeft, padding, client.right - padding, padding + Scale(SearchHeight)};
+		// Folder search above the tree, app search above the list, menu button at the end
+		const int searchBottom = padding + Scale(SearchHeight);
+		folderFrame_ = {padding, padding, treeRight, searchBottom};
+		menuButton_ = {client.right - padding - Scale(SearchHeight), padding, client.right - padding, searchBottom};
+		searchFrame_ = {listLeft, padding, menuButton_.left - Scale(Gap), searchBottom};
 
 		// Each edit box sits inside the rounded frame painted by the window, vertically centered
 		int editHeight = Scale(22);
@@ -398,8 +404,18 @@ namespace apptray
 		{
 			RoundRect(dc, frame.left, frame.top, frame.right, frame.bottom, radius, radius);
 		}
+		// The menu button: same frame, filled with the border colour while the mouse is over it
+		wil::unique_hbrush hotBrush(CreateSolidBrush(palette.border));
+		SelectObject(dc, menuButtonHot_ ? hotBrush.get() : theme_.SurfaceBrush());
+		RoundRect(dc, menuButton_.left, menuButton_.top, menuButton_.right, menuButton_.bottom, radius, radius);
 		SelectObject(dc, oldBrush);
 		SelectObject(dc, oldPen);
+		HGDIOBJ oldFont = SelectObject(dc, iconFont_.get());
+		SetBkMode(dc, TRANSPARENT);
+		SetTextColor(dc, palette.text);
+		RECT glyph = menuButton_;
+		DrawTextW(dc, MenuGlyph, -1, &glyph, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		SelectObject(dc, oldFont);
 		EndPaint(window_, &paint);
 	}
 
@@ -852,6 +868,20 @@ namespace apptray
 		}
 	}
 
+	void LauncherWindow::ShowAppTrayMenu()
+	{
+		RECT button = menuButton_;
+		MapWindowPoints(window_, nullptr, reinterpret_cast<POINT*>(&button), 2);
+		app_.ShowTrayMenu({button.right, button.bottom}, window_, &button);
+		menuClosedAt_ = GetTickCount64();
+		// The command may have closed the launcher (an app opened, Exit)
+		if (window_ != nullptr && menuButtonHot_)
+		{
+			menuButtonHot_ = false;
+			InvalidateRect(window_, &menuButton_, FALSE);
+		}
+	}
+
 	int LauncherWindow::GetImageIndex(size_t itemIndex)
 	{
 		if (itemIndex >= imageOf_.size())
@@ -1129,12 +1159,19 @@ namespace apptray
 				ShowContextMenu(std::nullopt);
 				return true;
 			case VK_F10:
+				if (control || IsKeyDown(VK_MENU))
+				{
+					return false;
+				}
 				if (shift)
 				{
 					ShowContextMenu(std::nullopt);
-					return true;
 				}
-				return false;
+				else
+				{
+					ShowAppTrayMenu();
+				}
+				return true;
 			case VK_TAB:
 				CycleFocus(shift);
 				return true;
@@ -1297,6 +1334,45 @@ namespace apptray
 			return 0;
 		case WM_NOTIFY:
 			return OnNotify(reinterpret_cast<const NMHDR*>(lParam));
+		case WM_LBUTTONDOWN:
+		{
+			// A click on the button while its menu is open closes the menu, and Windows passes that
+			// click on to the launcher: it must not open the menu again
+			constexpr ULONGLONG ReopenGuardMilliseconds = 300;
+			const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+			if (PtInRect(&menuButton_, point) && GetTickCount64() - menuClosedAt_ > ReopenGuardMilliseconds)
+			{
+				ShowAppTrayMenu();
+			}
+			return 0;
+		}
+		case WM_MOUSEMOVE:
+		{
+			const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+			const bool hot = PtInRect(&menuButton_, point) != FALSE;
+			if (hot != menuButtonHot_)
+			{
+				menuButtonHot_ = hot;
+				InvalidateRect(window, &menuButton_, FALSE);
+				if (hot)
+				{
+					TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
+					TrackMouseEvent(&track);
+				}
+			}
+			return 0;
+		}
+		case WM_MOUSELEAVE:
+			if (menuButtonHot_)
+			{
+				menuButtonHot_ = false;
+				InvalidateRect(window, &menuButton_, FALSE);
+			}
+			return 0;
+		case WM_INITMENUPOPUP:
+			// Category submenus of the tray menu opened from the menu button
+			app_.FillCategoryMenu(reinterpret_cast<HMENU>(wParam));
+			return 0;
 		case WM_APP_ICON:
 			OnIconReady(std::unique_ptr<IconResult>(reinterpret_cast<IconResult*>(lParam)));
 			return 0;
@@ -1355,6 +1431,8 @@ namespace apptray
 			treeFilters_.shrink_to_fit();
 			font_.reset();
 			searchFont_.reset();
+			iconFont_.reset();
+			menuButtonHot_ = false;
 			folderSearch_ = search_ = tree_ = list_ = status_ = nullptr;
 			window_ = nullptr;
 			closedAt_ = GetTickCount64();

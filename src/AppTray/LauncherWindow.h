@@ -76,6 +76,7 @@ namespace apptray
 		void MoveSelection(int delta);
 		void LaunchSelected(bool asAdmin);
 		void ShowContextMenu(std::optional<POINT> screenPoint);
+		void ShowAppTrayMenu(); // the tray icon's menu, below the menu button
 		int GetImageIndex(size_t itemIndex);
 		void OnIconReady(std::unique_ptr<IconResult> result);
 		LRESULT OnNotify(const NMHDR* header);
@@ -93,10 +94,14 @@ namespace apptray
 		HWND status_ = nullptr;
 		RECT folderFrame_{};
 		RECT searchFrame_{};
+		RECT menuButton_{};        // opens the tray icon's menu (painted, not a control)
+		bool menuButtonHot_ = false; // the mouse is over it
+		ULONGLONG menuClosedAt_ = 0; // the click that closes the menu must not open it again
 		UINT dpi_ = USER_DEFAULT_SCREEN_DPI;
 		Theme theme_;
 		wil::unique_hfont font_;
 		wil::unique_hfont searchFont_;
+		wil::unique_hfont iconFont_; // Segoe MDL2 Assets, for the menu button glyph
 		HIMAGELIST images_ = nullptr;
 		int iconSize_ = 16;
 		std::vector<int> imageOf_; // per item: -1 not requested, -2 pending, else image index

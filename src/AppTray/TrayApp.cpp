@@ -38,6 +38,7 @@ namespace apptray
 			SettingsCommand,
 			StartWithWindowsCommand,
 			NewVersionCommand,
+			CheckUpdateCommand,
 			ExitCommand,
 			AppCommandBase = 10000,
 		};
@@ -1017,11 +1018,29 @@ namespace apptray
 		if (checked && now && *now >= *checked && *now - *checked < DaySeconds)
 		{
 			nextUpdateCheck_ = GetTickCount64() + static_cast<ULONGLONG>(DaySeconds - (*now - *checked)) * 1000;
-			ApplyUpdateState();
+			ApplyUpdateState(false);
 			return;
 		}
 		const std::wstring arguments = L"--check-update --data " + QuoteArgument(paths_.dataDirectory.wstring());
 		updateChecking_ = StartChildProcess(arguments, WM_APP_UPDATE_DONE, updateThread_);
+	}
+
+	// "Comprobar nueva versión": asks GitHub now, whatever the daily schedule (and the
+	// checkForUpdates setting) says, and always reports the answer
+	void TrayApp::CheckForUpdatesNow()
+	{
+		manualUpdateCheck_ = true;
+		if (updateChecking_)
+		{
+			return; // the check already running reports
+		}
+		const std::wstring arguments = L"--check-update --data " + QuoteArgument(paths_.dataDirectory.wstring());
+		updateChecking_ = StartChildProcess(arguments, WM_APP_UPDATE_DONE, updateThread_);
+		if (!updateChecking_)
+		{
+			manualUpdateCheck_ = false;
+			ReportError(text::UpdateCheckTitle, DescribeLaunchError({false, false, GetLastError()}));
+		}
 	}
 
 	void TrayApp::OnUpdateCheckDone(DWORD exitCode)
@@ -1031,20 +1050,44 @@ namespace apptray
 		{
 			updateThread_.join();
 		}
-		if (!exiting_ && (exitCode == 0 || exitCode == static_cast<DWORD>(ExitCodeUpdateAvailable)))
+		const bool manual = std::exchange(manualUpdateCheck_, false);
+		if (exiting_)
 		{
-			ApplyUpdateState();
+			return;
+		}
+		if (exitCode == 0 || exitCode == static_cast<DWORD>(ExitCodeUpdateAvailable))
+		{
+			constexpr ULONGLONG Day = 24ULL * 60 * 60 * 1000;
+			nextUpdateCheck_ = std::max(nextUpdateCheck_, GetTickCount64() + Day);
+			ApplyUpdateState(manual);
+			if (manual && !newRelease_)
+			{
+				// The child found a newer release but update.json could not be written or read
+				if (exitCode == static_cast<DWORD>(ExitCodeUpdateAvailable))
+				{
+					ReportError(text::UpdateCheckTitle, text::UpdateNotSaved);
+				}
+				else
+				{
+					ReportInfo(text::UpdateCheckTitle, std::format(text::UpToDate, APPTRAY_VERSION_WIDE));
+				}
+			}
 		}
 		else
 		{
 			// Offline or GitHub unreachable: try again in an hour rather than tomorrow
 			constexpr ULONGLONG Hour = 60ULL * 60 * 1000;
 			nextUpdateCheck_ = GetTickCount64() + Hour;
+			if (manual)
+			{
+				ReportError(text::UpdateCheckTitle, text::UpdateCheckFailed);
+			}
 		}
 	}
 
-	// Reads update.json: a newer version adds a menu entry, and is announced once
-	void TrayApp::ApplyUpdateState()
+	// Reads update.json: a newer version adds a menu entry, and is announced once (every time
+	// when announce: the user asked)
+	void TrayApp::ApplyUpdateState(bool announce)
 	{
 		const fs::path file = paths_.dataDirectory / L"update.json";
 		std::optional<UpdateState> state = LoadUpdateState(file);
@@ -1054,10 +1097,17 @@ namespace apptray
 			return;
 		}
 		newRelease_ = ReleaseInfo{state->latestVersion, state->url};
-		if (state->notifiedVersion != state->latestVersion)
+		if (announce || state->notifiedVersion != state->latestVersion)
 		{
-			trayIcon_.ShowNotification(
-				text::NewVersionTitle, std::format(text::NewVersionText, state->latestVersion, APPTRAY_VERSION_WIDE), false);
+			const std::wstring message = std::format(text::NewVersionText, state->latestVersion, APPTRAY_VERSION_WIDE);
+			if (announce)
+			{
+				ReportInfo(text::NewVersionTitle, message); // in the launcher's status line if it is open
+			}
+			else
+			{
+				trayIcon_.ShowNotification(text::NewVersionTitle, message, false);
+			}
 			state->notifiedVersion = state->latestVersion;
 			std::wstring error;
 			SaveUpdateState(file, *state, error);
@@ -1300,8 +1350,9 @@ namespace apptray
 		}
 	}
 
-	void TrayApp::ShowTrayMenu(POINT point)
+	void TrayApp::ShowTrayMenu(POINT point, HWND owner, const RECT* exclude)
 	{
+		const bool fromLauncher = owner != nullptr;
 		ReloadSettingsIfChanged();
 		RegisterLauncherHotkey(false); // retries a hotkey another program held
 		CheckForUpdates(); // at most once a day
@@ -1314,11 +1365,14 @@ namespace apptray
 			AppendMenuW(menu, MF_STRING, NewVersionCommand, label.c_str());
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		}
-		const std::wstring openLabel =
-			hotkeyLabel_.empty() ? std::wstring(text::OpenLauncher) : std::format(L"{}\t{}", text::OpenLauncher, hotkeyLabel_);
-		AppendMenuW(menu, MF_STRING, OpenLauncherCommand, openLabel.c_str());
-		SetMenuDefaultItem(menu, OpenLauncherCommand, FALSE);
-		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		if (!fromLauncher)
+		{
+			const std::wstring openLabel = hotkeyLabel_.empty() ? std::wstring(text::OpenLauncher)
+																: std::format(L"{}\t{}", text::OpenLauncher, hotkeyLabel_);
+			AppendMenuW(menu, MF_STRING, OpenLauncherCommand, openLabel.c_str());
+			SetMenuDefaultItem(menu, OpenLauncherCommand, FALSE);
+			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		}
 
 		AppFilter favorites;
 		favorites.kind = AppFilterKind::Favorites;
@@ -1369,15 +1423,36 @@ namespace apptray
 		AppendMenuW(menu, MF_STRING | (scanning_ ? MF_GRAYED : 0), RefreshCommand, scanning_ ? text::Refreshing : text::Refresh);
 		AppendMenuW(menu, MF_STRING, SettingsCommand, text::EditSettings);
 		AppendMenuW(menu, MF_STRING | (IsRegisteredAtLogon(exePath_) ? MF_CHECKED : 0), StartWithWindowsCommand, text::StartWithWindows);
+		AppendMenuW(
+			menu, MF_STRING | (updateChecking_ ? MF_GRAYED : 0), CheckUpdateCommand,
+			updateChecking_ ? text::CheckingUpdate : text::CheckUpdate);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, ExitCommand, text::Exit);
 
-		// Without the foreground the menu would not close when clicking elsewhere
-		SetForegroundWindow(window_);
-		const UINT alignment = GetSystemMetrics(SM_MENUDROPALIGNMENT) != 0 ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
+		UINT flags = TPM_RETURNCMD | TPM_RIGHTBUTTON;
+		TPMPARAMS around{};
+		around.cbSize = sizeof(around);
+		if (fromLauncher)
+		{
+			// Below the launcher's menu button, or above it when it does not fit: never over it
+			flags |= TPM_RIGHTALIGN | TPM_TOPALIGN | TPM_VERTICAL;
+			if (exclude != nullptr)
+			{
+				around.rcExclude = *exclude;
+			}
+		}
+		else
+		{
+			// Without the foreground the menu would not close when clicking elsewhere
+			SetForegroundWindow(window_);
+			flags |= TPM_BOTTOMALIGN | (GetSystemMetrics(SM_MENUDROPALIGNMENT) != 0 ? TPM_RIGHTALIGN : TPM_LEFTALIGN);
+		}
 		const UINT command = static_cast<UINT>(TrackPopupMenuEx(
-			menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | alignment, point.x, point.y, window_, nullptr));
-		PostMessageW(window_, WM_NULL, 0, 0);
+			menu, flags, point.x, point.y, fromLauncher ? owner : window_, exclude != nullptr ? &around : nullptr));
+		if (!fromLauncher)
+		{
+			PostMessageW(window_, WM_NULL, 0, 0);
+		}
 		DestroyMenu(menu);
 		categoryMenus_.clear();
 
@@ -1403,8 +1478,12 @@ namespace apptray
 		case SettingsCommand:
 			OpenSettingsFile();
 			break;
+		case CheckUpdateCommand:
+			CheckForUpdatesNow();
+			break;
 		case ExitCommand:
-			DestroyWindow(window_);
+			// Posted: from the launcher's button this runs inside the launcher's own message
+			PostMessageW(window_, WM_APP_EXIT, 0, 0);
 			break;
 		default:
 			if (command >= AppCommandBase)

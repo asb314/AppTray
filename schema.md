@@ -22,7 +22,7 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 | `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), `--create-shortcut`, single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
 | `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps, shortcuts, logon apps, Start with Windows, daily update check |
 | `StartupPrompt` | The logon dialog: "ask" apps as a check-box list view with a countdown (Abrir / Ninguna) |
-| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), status line with version; created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
+| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), status line with version, a painted menu button (and F10) that opens the tray menu owned by the launcher (it forwards `WM_INITMENUPOPUP`); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
 | `TrayIcon` | `Shell_NotifyIcon` v4 with a GUID (falls back to a plain id if refused): add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
@@ -46,9 +46,9 @@ Scanning in parallel: the root's folders are independent subtrees, scanned by up
 and merged in folder order (same result as a sequential scan). A cold scan is mostly waiting
 for the antivirus to clear each executable opened, and those waits overlap.
 
-Other child processes, same mechanism (`StartChildProcess`): `--check-update` at most once a day
-(exit 10 = newer release; the result is read from `data\update.json`, a failure retries in an
-hour), and `--create-shortcut <id> --shortcut-in desktop|startmenu` (`IShellLink` loads the
+Other child processes, same mechanism (`StartChildProcess`): `--check-update` at most once a day,
+or at once from "Comprobar nueva versión" (then the answer is always reported) (exit 10 = newer
+release; the result is read from `data\update.json`, a failure retries in an hour), and `--create-shortcut <id> --shortcut-in desktop|startmenu` (`IShellLink` loads the
 shell namespace, which would stay in the tray's memory). Creating or deleting an elevated task runs `AppTray.exe --register-task <id>` with
 `runas` instead (one UAC prompt); `elevatedTask` is written to `user.json` only when that copy
 exits with 0.
