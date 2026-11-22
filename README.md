@@ -71,7 +71,8 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 		"fsiv" FastStone Image Viewer. Right click › "Keywords…" gives an app more words to be
 		found by ("retouch" for GIMP; `"keywords"` in `user.json`). Names or keywords starting
 		with the first word come first, then names whose initials do, and within each group the
-		apps you open most.
+		apps you open most. Favorites carry a ★ before their name, except in the plain Favorites
+		list (a search from there looks everywhere, and marks them).
 	- **Running apps** show "running" next to their folder and in the status line (same test
 		as at logon, below). Enter switches to the app's window (restored if minimized) instead
 		of starting a second copy; Shift+Enter, or right click › "Open another copy", starts

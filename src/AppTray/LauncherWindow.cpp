@@ -588,6 +588,8 @@ namespace apptray
 		}
 		visible_ = noFolderMatch_ && effective.search.empty() ? std::vector<size_t>{}
 															  : FilterAppItems(items, effective, app_.Settings().favorites);
+		// There every row is one (a search from Favorites looks everywhere: then they are marked)
+		markFavorites_ = effective.kind != AppFilterKind::Favorites;
 		// Icons of rows no longer shown wait behind: drop them so the visible ones come first
 		if (iconWorker_)
 		{
@@ -998,6 +1000,10 @@ namespace apptray
 			if (info->item.iSubItem == 0)
 			{
 				text = item.entry->missing ? std::format(L"{}  ({})", item.name, text::NotFound) : item.name;
+				if (item.favorite && markFavorites_)
+				{
+					text = L"\x2605 " + text; // black star
+				}
 			}
 			else
 			{

@@ -115,6 +115,7 @@ namespace apptray
 		bool folderFilterChanged_ = false; // the text changed: pick the first matching folder
 		bool noFolderMatch_ = false;
 		std::vector<size_t> visible_;
+		bool markFavorites_ = true; // a star before favorites' names, except in Favorites itself
 		std::wstring selectedId_; // survives a rebuild of the items (indices do not)
 		std::wstring statusOverride_;
 		bool wasActive_ = false;
