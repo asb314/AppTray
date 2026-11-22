@@ -92,6 +92,18 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 		console" turns this off (or on) for that app (`"console": false|true` in `user.json`).
 		Right click › "Open a console here" opens one in any app's folder without running
 		anything.
+	- **PowerShell scripts** (`.ps1`): loose ones in the root are listed as their own entry,
+		and one named like its folder as that folder's program (`WinUtil\winutil.ps1`). Other
+		scripts below the root are taken for helpers (build, install, activate) and only show
+		as another executable of their app: give a script of yours its own folder named like it.
+		Opened directly, Windows would show them in Notepad, so AppTray runs them in a
+		PowerShell console that stays open, in their folder, whatever `"shell"` says, also at
+		logon. The execution policy is bypassed for that console only, so a script unzipped
+		from a download runs too, unless a Group Policy sets the policy; a script that relaunches
+		itself (elevated, say) must pass `-ExecutionPolicy Bypass` on to its new process. List
+		only scripts you trust, as with any program. Their `"args"` are PowerShell syntax
+		(`status -Name 'a b'`). "Open as administrator" runs the console elevated; "Open without
+		UAC" is for executables only. A shortcut to a script opens that same console.
 	- Right click › "Its folder on the PATH" adds the folder of the app's executable (a
 		suite's folder) to your user `PATH` (`HKCU\Environment`), or takes it out; the check
 		mark shows whether it is there, also when added by hand. Consoles opened from then on,

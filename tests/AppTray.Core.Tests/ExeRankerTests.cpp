@@ -88,6 +88,17 @@ TEST(ExeRanker, Should_PreferPortableLaunchScript)
 	EXPECT_EQ(PickBest(L"Shotcut", {Make(L"shotcut.exe", MakeGuiInfo()), Make(L"Shotcut portable.cmd")}), L"Shotcut portable.cmd");
 }
 
+TEST(ExeRanker, Should_LaunchPowerShellScripts_AfterTheProgram)
+{
+	EXPECT_EQ(GetLaunchType(L"AdminShares.ps1"), LaunchType::PowerShellScript);
+	EXPECT_EQ(GetLaunchType(L"WINUTIL.PS1"), LaunchType::PowerShellScript);
+	EXPECT_EQ(GetLaunchType(L"profile.ps1xml"), LaunchType::None);
+	EXPECT_EQ(GetLaunchType(L"module.psm1"), LaunchType::None);
+	EXPECT_EQ(PickBest(L"Tool", {Make(L"build.ps1"), Make(L"Tool.exe", MakeGuiInfo())}), L"Tool.exe");
+	// A script named like its folder still loses to the program, as .bat and .cmd do
+	EXPECT_EQ(PickBest(L"Tool", {Make(L"Tool.ps1"), Make(L"Tool.exe", MakeGuiInfo())}), L"Tool.exe");
+}
+
 TEST(ExeRanker, Should_UseProductNameWhenFileNameSaysNothing)
 {
 	EXPECT_EQ(
@@ -121,7 +132,7 @@ TEST(ExeRanker, Should_RecognizeInstallerNames)
 		 {L"setup.exe", L"unins000.exe", L"Firebird-2.5.9-Setup.exe", L"GIMPPortable_3.2.6.paf.exe",
 		  L"harddisksentinelupdate.exe", L"Keygen.exe", L"ib64_install.exe", L"http annalyzer FiddlerSetup.exe",
 		  L"SetupVirtualCloneDrive5450.exe", L"innosetup-7.1.0-x64.exe", L"PATCH FOR SLYSOFT PRODUCTS.EXE",
-		  L"FastCopy5.11.2_installer.exe"})
+		  L"FastCopy5.11.2_installer.exe", L"instalar.ps1", L"Desinstalar Yazi.bat", L"instalador.exe"})
 	{
 		EXPECT_TRUE(IsInstallerName(name)) << name;
 	}

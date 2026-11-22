@@ -4,6 +4,7 @@
 #include "Catalog.h"
 #include "CatalogRefresher.h"
 #include "CommandLine.h"
+#include "ConsoleCommand.h"
 #include "ElevatedTask.h"
 #include "Log.h"
 #include "PathResolver.h"
@@ -311,24 +312,36 @@ namespace
 			return ExitCodeScanFailed;
 		}
 
+		ShortcutSpec spec;
+		spec.target = *target;
+		if (!isFolder)
+		{
+			spec.arguments = item->args;
+			spec.workingDirectory = target->parent_path(); // as AppTray starts it
+		}
+		// The shell would open a script in Notepad: its shortcut opens the console AppTray uses
+		const bool isScript = !isFolder && IsPowerShellScript(*target);
+		if (isScript)
+		{
+			ConsoleCommand command = BuildScriptCommand(*target, item->args);
+			spec.target = std::move(command.program);
+			spec.arguments = std::move(command.parameters);
+		}
+		spec.description = item->entry->description;
+
 		const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 		bool done = false;
-		ShortcutSpec spec;
 		const fs::path folder = GetShortcutFolder(*place, error);
-		spec.file = folder.empty() ? fs::path{} : ChooseShortcutFile(folder, MakeShortcutFileName(item->name), *target);
-		if (!folder.empty() && spec.file.empty())
+		if (!folder.empty())
 		{
-			error = L"no free shortcut name in " + folder.wstring();
+			spec.file = ChooseShortcutFile(folder, MakeShortcutFileName(item->name), *target);
+			if (spec.file.empty())
+			{
+				error = L"no free shortcut name in " + folder.wstring();
+			}
 		}
 		if (!spec.file.empty())
 		{
-			spec.target = *target;
-			if (!isFolder)
-			{
-				spec.arguments = item->args;
-				spec.workingDirectory = target->parent_path(); // as AppTray starts it
-			}
-			spec.description = item->entry->description;
 			done = WriteShortcut(spec, error);
 		}
 		if (SUCCEEDED(com))

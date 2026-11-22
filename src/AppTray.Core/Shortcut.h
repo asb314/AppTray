@@ -23,6 +23,8 @@ namespace apptray
 
 	// The file to write in folder: fileName if free or already a shortcut to target, else
 	// "Name (2).lnk", "Name (3).lnk"... so a shortcut that opens something else is never replaced.
+	// For a .ps1 target, a shortcut to it is one that opens PowerShell (pwsh.exe or
+	// powershell.exe) with the script's quoted path in its arguments, as BuildScriptCommand does.
 	// Empty if all are taken. Reads existing links: needs COM.
 	std::filesystem::path ChooseShortcutFile(
 		const std::filesystem::path& folder, std::wstring_view fileName, const std::filesystem::path& target);

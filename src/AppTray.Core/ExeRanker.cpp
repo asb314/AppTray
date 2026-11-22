@@ -14,11 +14,12 @@ namespace apptray
 	namespace
 	{
 		// Whole words of a file name that point to an installer or a crack, not the program:
-		// "Firebird-2.5-Setup", "unins000", "PATCH FOR SLYSOFT", "Keygen"
+		// "Firebird-2.5-Setup", "unins000", "PATCH FOR SLYSOFT", "Keygen", and Spanish ones for the
+		// user's own scripts ("instalar.ps1")
 		constexpr std::wstring_view InstallerWords[] = {
 			L"setup", L"install", L"installer", L"uninstall", L"uninst", L"unins", L"update",
 			L"updater", L"patch", L"keygen", L"crack", L"redist", L"vcredist", L"activator",
-			L"keymaker", L"kg",
+			L"keymaker", L"kg", L"instalar", L"instalador", L"desinstalar", L"desinstalador",
 		};
 
 		// Beginnings or endings of a single glued word: "innosetup", "SetupAnyDVD",
@@ -125,6 +126,10 @@ namespace apptray
 		{
 			return LaunchType::Script;
 		}
+		if (EndsWithIgnoreCase(fileName, L".ps1"))
+		{
+			return LaunchType::PowerShellScript;
+		}
 		if (EndsWithIgnoreCase(fileName, L".jar"))
 		{
 			return LaunchType::Jar;
@@ -209,6 +214,7 @@ namespace apptray
 			}
 			break;
 		case LaunchType::Script:
+		case LaunchType::PowerShellScript:
 			score += IsLaunchScriptName(lowerStem) ? 60 : -10;
 			break;
 		case LaunchType::Shortcut:

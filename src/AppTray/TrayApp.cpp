@@ -630,6 +630,12 @@ namespace apptray
 		{
 			result = OpenWithShell(*path);
 		}
+		else if (IsPowerShellScript(*path) && fs::is_regular_file(*path, missing))
+		{
+			// At logon too: opened through the shell, a script would only show up in Notepad
+			const ConsoleCommand command = BuildScriptCommand(*path, item.args);
+			result = LaunchProgram(command.program, command.parameters, asAdmin, path->parent_path());
+		}
 		else if (!atLogon && OpensInConsole(item) && fs::is_regular_file(*path, missing))
 		{
 			// A command-line tool would flash a console that closes at once: it runs in one that stays

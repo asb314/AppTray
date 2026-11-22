@@ -62,6 +62,16 @@ namespace apptray
 		constexpr size_t SuiteThreshold = 15;   // top-level executables without a matching name
 		constexpr size_t AlternativeLimit = 40;
 		constexpr int MatchThreshold = 40;
+
+		// Below the root, a PowerShell script counts only when named like its folder
+		// (WinUtil\winutil.ps1). Others are helpers (build, install, activate): counted, their
+		// folder (an app's scripts\, a DLL folder with build.ps1) would turn into an app of its
+		// own and split the app around it. They stay alternatives of the app they belong to.
+		bool IsHelperScript(std::wstring_view folderName, std::wstring_view fileName)
+		{
+			return GetLaunchType(fileName) == LaunchType::PowerShellScript
+				&& ScoreNameMatch(folderName, fileName) < MatchThreshold;
+		}
 		constexpr int InspectLimit = 4;   // executables opened per app folder, best ranked first
 		constexpr int InspectMargin = 30; // ... and only those within this many points of the best
 		constexpr size_t ParallelFolders = 8; // top-level folders scanned at the same time
@@ -847,7 +857,7 @@ namespace apptray
 				std::vector<FileItem> installers;
 				for (const FileItem& file : listing.files)
 				{
-					if (IsLaunchable(file.name))
+					if (IsLaunchable(file.name) && !IsHelperScript(name, file.name))
 					{
 						(IsInstallerName(file.name) ? installers : programs).push_back(file);
 					}

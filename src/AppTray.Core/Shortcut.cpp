@@ -1,5 +1,6 @@
 #include "Shortcut.h"
 
+#include "ConsoleCommand.h"
 #include "StringUtil.h"
 
 #include <windows.h>
@@ -72,8 +73,14 @@ namespace apptray
 
 	namespace
 	{
-		// Target of an existing .lnk; empty if it cannot be read
-		std::wstring ReadShortcutTarget(const fs::path& file)
+		struct ShortcutCommand
+		{
+			std::wstring target;
+			std::wstring arguments;
+		};
+
+		// Target and arguments of an existing .lnk; an empty target if it cannot be read
+		ShortcutCommand ReadShortcutCommand(const fs::path& file)
 		{
 			wil::com_ptr_nothrow<IShellLinkW> link;
 			wil::com_ptr_nothrow<IPersistFile> persist;
@@ -82,13 +89,37 @@ namespace apptray
 			{
 				return {};
 			}
-			std::wstring path(32768, L'\0');
-			if (FAILED(link->GetPath(path.data(), static_cast<int>(path.size()), nullptr, SLGP_RAWPATH)))
+			ShortcutCommand command;
+			command.target.resize(32768);
+			if (FAILED(link->GetPath(command.target.data(), static_cast<int>(command.target.size()), nullptr, SLGP_RAWPATH)))
 			{
 				return {};
 			}
-			path.resize(wcsnlen(path.c_str(), path.size()));
-			return path;
+			command.target.resize(wcsnlen(command.target.c_str(), command.target.size()));
+			command.arguments.resize(32768);
+			if (FAILED(link->GetArguments(command.arguments.data(), static_cast<int>(command.arguments.size()))))
+			{
+				command.arguments.clear(); // the target is still known
+			}
+			command.arguments.resize(wcsnlen(command.arguments.c_str(), command.arguments.size()));
+			return command;
+		}
+
+		bool IsShortcutTo(const ShortcutCommand& link, const fs::path& target)
+		{
+			if (link.target.empty())
+			{
+				return false;
+			}
+			const fs::path linkTarget = fs::path(link.target).lexically_normal();
+			if (!IsPowerShellScript(target))
+			{
+				return EqualsIgnoreCase(linkTarget.wstring(), target.lexically_normal().wstring());
+			}
+			// The PowerShell found may change (pwsh installed later) and so may the arguments
+			const std::wstring host = linkTarget.filename().wstring();
+			return (EqualsIgnoreCase(host, L"pwsh.exe") || EqualsIgnoreCase(host, L"powershell.exe"))
+				&& ContainsIgnoreCase(link.arguments, QuoteForPowerShell(target.lexically_normal().wstring()));
 		}
 	}
 
@@ -99,7 +130,6 @@ namespace apptray
 		{
 			stem.resize(stem.size() - 4);
 		}
-		const std::wstring wanted = target.lexically_normal().wstring();
 		for (int number = 1; number <= 99; ++number)
 		{
 			const fs::path candidate =
@@ -109,8 +139,7 @@ namespace apptray
 			{
 				return candidate;
 			}
-			const std::wstring current = ReadShortcutTarget(candidate);
-			if (!current.empty() && EqualsIgnoreCase(fs::path(current).lexically_normal().wstring(), wanted))
+			if (IsShortcutTo(ReadShortcutCommand(candidate), target))
 			{
 				return candidate; // ours (or the same thing anyway): refreshed
 			}

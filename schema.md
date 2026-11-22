@@ -35,7 +35,8 @@ After loading the catalog, after each refresh and when the launcher closes, the 
 compacted (`HeapCompact`): ~2.5 MB of private memory after start (6 MB without it), ~5 MB once
 the launcher has been used. Icons avoid `SHGetFileInfo` and `IShellLink` on purpose: both load
 the shell namespace, which left ~1.5 MB and four threads behind for good. Scripts get cmd.exe's
-icon, folders the stock folder icon, and `.lnk` files are read directly (MS-SHLLINK).
+icon (`.ps1` the PowerShell one), folders the stock folder icon, and `.lnk` files are read
+directly (MS-SHLLINK).
 
 Refresh: the tray never scans in its own process. It starts `AppTray.exe --scan --root ...
 --data ...` (below-normal priority) and waits for it on a thread; exit code 0 means
@@ -85,7 +86,13 @@ Consoles: a target whose executable is a console program (`AppEntry::console` fr
 `-NoExit -Command` (the app's arguments after `--%`, untouched) or `cmd /s /k` (operators in
 the arguments escaped; `pushd`, which also enters UNC folders), with the folder prepended to
 `PATH` and made current inside the command line itself, so it also works through `runas`. Not
-at logon, and not for a missing executable (the shell would hide the "not found"). "Its folder on the PATH" edits `HKCU\Environment\Path` (`UserPath`: entries compared
+at logon, and not for a missing executable (the shell would hide the "not found").
+A `.ps1` target (`IsPowerShellScript`) always starts through `BuildScriptCommand`, at logon
+too: the same PowerShell command in the script's folder, whatever the `shell` setting, plus
+`-ExecutionPolicy Bypass` (that process only; a Group Policy still wins) and the arguments as
+PowerShell syntax (no `--%`). Through `ShellExecute` a `.ps1` opens in Notepad. Its shortcuts
+point at that console too; `ChooseShortcutFile` takes as the script's any link to pwsh or
+powershell with its quoted path in the arguments. "Its folder on the PATH" edits `HKCU\Environment\Path` (`UserPath`: entries compared
 expanded, unquoted, without trailing backslash, case-insensitive; the value type is kept),
 refreshes the tray's own `PATH` from the registry (`CreateEnvironmentBlock`) and broadcasts
 `WM_SETTINGCHANGE "Environment"` on a detached thread. The tray also refreshes its `PATH` when
@@ -122,7 +129,7 @@ a `std::stop_token` (used by callers that scan in-process).
 | `LogonRegistration` | The HKCU `Run` values of AppTray (`"exe" --startup`): `AppTray` for the first copy, `AppTray (<tree folder>)` for others; set, delete (only this exe's), repair when the exe moved (the one value whose exe is missing and has the same last three path parts; a missing exe's value is never reused for another copy, it may be on an unplugged drive) |
 | `ProcessFinder` | Running processes with their image paths (`QueryFullProcessImageName`, works for elevated ones) and the processes of an app (by file, or by folder prefix) |
 | `AppWindows` | Main windows of some processes (as the taskbar shows them), activate one, ask one to close |
-| `ConsoleCommand` | The console shell (pwsh / Windows PowerShell / cmd) and its command line: open in a folder with it first in `PATH`, optionally run a program, stay open |
+| `ConsoleCommand` | The console shell (pwsh / Windows PowerShell / cmd) and its command line: open in a folder with it first in `PATH`, optionally run a program, stay open; how a `.ps1` runs (`BuildScriptCommand`) |
 | `UserPath` | The user's `PATH` in `HKCU\Environment`: find, add, remove and rebase entries; read/write keeping the value type; announce the change; refresh the process's own `PATH` |
 | `UpdateCheck` | Latest GitHub release over WinHTTP, version comparison, `update.json` |
 | `Version.h` | Version number and GitHub repository (also used by the `.rc` and `New-Release.ps1`) |
@@ -146,8 +153,12 @@ For each folder F (max depth 6):
 	`_originales`, `_anterior`..., and names with the tokens `crack`, `keygen`, `keymaker`,
 	`patch`, `activator`. Inside an app folder, resource folders (`locale`, `docs`, `help`,
 	`platforms`...) are not searched for executables either; elsewhere they are categories.
-3. Launchable files: `.exe .bat .cmd .jar .lnk`. Installers by whole words of the name
-	(`setup`, `install`, `unins000`, `update`, `patch`, `keygen`, `crack`, `redist`, `*.paf.exe`,
+3. Launchable files: `.exe .bat .cmd .ps1 .jar .lnk` (scripts rank below a program unless
+	named as a launcher: `portable`, `launch`...). Below the root a `.ps1` counts only when
+	named like its folder (`IsHelperScript`): other scripts are helpers that would make an
+	app's `scripts\` an app of its own; they remain alternatives. Installers by whole words of the name
+	(`setup`, `install`, `unins000`, `update`, `patch`, `keygen`, `crack`, `redist`, Spanish
+	`instalar`/`instalador`/`desinstalar`, `*.paf.exe`,
 	glued "FiddlerSetup"/"SetupAnyDVD" but not "WinSetupFromUSB") or by version info ("… Setup",
 	"… Installer", but not "Inno Setup Compiler").
 4. F is an **app folder** when it has programs and (a program name matches the folder name,

@@ -6,7 +6,7 @@
 
 namespace apptray
 {
-	// Removes a launchable extension (.exe, .bat, .cmd, .jar, .lnk) and a PortableApps ".paf"
+	// Removes a launchable extension (.exe, .bat, .cmd, .ps1, .jar, .lnk) and a PortableApps ".paf"
 	// marker: "GIMPPortable_3.2.paf.exe" -> "GIMPPortable_3.2.paf" -> "GIMPPortable_3.2"
 	std::wstring StripLaunchExtension(std::wstring_view fileName);
 

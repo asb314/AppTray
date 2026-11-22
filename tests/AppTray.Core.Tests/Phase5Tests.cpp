@@ -191,6 +191,29 @@ TEST(ConsoleCommand, Should_QuotePowerShellLiterals_AndTheWholeCommandAsOneArgum
 	EXPECT_EQ(root.parameters, L"-NoExit -NoLogo -Command \"$env:Path = 'D:\\;' + $env:Path; Set-Location -LiteralPath 'D:\\'\"");
 }
 
+TEST(ConsoleCommand, Should_RunAPowerShellScript_WithThePolicyBypassed_AndItsArgumentsAsPowerShell)
+{
+	EXPECT_TRUE(IsPowerShellScript(L"C:\\Apps\\AdminShares.PS1"));
+	EXPECT_FALSE(IsPowerShellScript(L"C:\\Apps\\run.cmd"));
+	EXPECT_FALSE(IsPowerShellScript(L"C:\\Apps\\types.ps1xml"));
+
+	const ConsoleCommand script = BuildConsoleCommand(
+		ConsoleShell::PowerShell, L"pwsh.exe", L"C:\\Apps", std::filesystem::path(L"C:\\Apps\\AdminShares.ps1"),
+		L"status -Name 'x y'");
+	EXPECT_EQ(
+		script.parameters,
+		L"-NoExit -NoLogo -ExecutionPolicy Bypass -Command \"$env:Path = 'C:\\Apps;' + $env:Path; "
+		L"Set-Location -LiteralPath 'C:\\Apps'; & 'C:\\Apps\\AdminShares.ps1' status -Name 'x y'\"");
+
+	// Always PowerShell, in the script's folder, whatever the user's console shell is
+	const ConsoleCommand started = BuildScriptCommand(L"C:\\Apps\\Utils\\winutil.ps1", L"");
+	EXPECT_EQ(started.program, FindShellProgram(ConsoleShell::PowerShell));
+	EXPECT_EQ(
+		started.parameters,
+		L"-NoExit -NoLogo -ExecutionPolicy Bypass -Command \"$env:Path = 'C:\\Apps\\Utils;' + $env:Path; "
+		L"Set-Location -LiteralPath 'C:\\Apps\\Utils'; & 'C:\\Apps\\Utils\\winutil.ps1'\"");
+}
+
 TEST(ConsoleCommand, Should_ReadTheShellSetting_AndFindItsProgram)
 {
 	EXPECT_EQ(ParseConsoleShell(L"cmd"), ConsoleShell::Cmd);

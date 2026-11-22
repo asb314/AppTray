@@ -9,6 +9,7 @@
 #include "FolderScanner.h"
 #include "Hotkey.h"
 #include "NameTokens.h"
+#include "ConsoleCommand.h"
 #include "Shortcut.h"
 #include "UsageStats.h"
 #include "UserSettings.h"
@@ -482,6 +483,17 @@ TEST(Shortcut, Should_WriteALinkFile)
 	EXPECT_EQ(ChooseShortcutFile(tree.Root(), L"cmd.lnk", spec.target), spec.file);
 	const std::filesystem::path notepad = std::filesystem::path(windows) / L"System32" / L"notepad.exe";
 	EXPECT_EQ(ChooseShortcutFile(tree.Root(), L"cmd.lnk", notepad), tree.Root() / L"cmd (2).lnk");
+
+	// A script's shortcut opens PowerShell: it is the script's when its path is in the arguments
+	const std::filesystem::path script = tree.Root() / L"Bob's tool.ps1";
+	ShortcutSpec scriptLink;
+	scriptLink.file = tree.Root() / L"Tool.lnk";
+	scriptLink.target = std::filesystem::path(windows) / L"System32" / L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
+	scriptLink.arguments = L"-NoExit -Command \"& " + QuoteForPowerShell(script.wstring()) + L" old args\"";
+	EXPECT_TRUE(WriteShortcut(scriptLink, error)) << error;
+	EXPECT_EQ(ChooseShortcutFile(tree.Root(), L"Tool.lnk", script), scriptLink.file);
+	EXPECT_EQ(ChooseShortcutFile(tree.Root(), L"Tool.lnk", tree.Root() / L"other.ps1"), tree.Root() / L"Tool (2).lnk");
+	EXPECT_EQ(ChooseShortcutFile(tree.Root(), L"cmd.lnk", script), tree.Root() / L"cmd (2).lnk");
 	if (SUCCEEDED(com))
 	{
 		CoUninitialize();

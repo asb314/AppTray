@@ -15,7 +15,7 @@ namespace apptray
 
 	// Starts a program (or .bat, .lnk, .jar) through the shell, in its own folder unless directory
 	// says another. asAdmin uses the "runas" verb; programs whose manifest asks for elevation get the
-	// UAC prompt anyway.
+	// UAC prompt anyway. Not for a .ps1, which the shell opens in Notepad: see BuildScriptCommand.
 	LaunchResult LaunchProgram(
 		const std::filesystem::path& target, std::wstring_view arguments, bool asAdmin, const std::filesystem::path& directory = {});
 

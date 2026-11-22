@@ -24,6 +24,7 @@ TEST(NameTokens, Should_StripLaunchAndPortableAppsExtensions)
 {
 	EXPECT_EQ(StripLaunchExtension(L"GIMPPortable_3.2.6.paf.exe"), L"GIMPPortable_3.2.6");
 	EXPECT_EQ(StripLaunchExtension(L"launch_qgis_portable.bat"), L"launch_qgis_portable");
+	EXPECT_EQ(StripLaunchExtension(L"AdminShares.ps1"), L"AdminShares");
 	EXPECT_EQ(StripLaunchExtension(L"readme.txt"), L"readme.txt");
 }
 

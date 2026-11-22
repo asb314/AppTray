@@ -1,5 +1,6 @@
 #include "IconLoader.h"
 
+#include "ConsoleCommand.h"
 #include "StringUtil.h"
 
 #include <objbase.h>
@@ -271,6 +272,15 @@ namespace apptray
 		else if (EndsWithIgnoreCase(text, L".bat") || EndsWithIgnoreCase(text, L".cmd"))
 		{
 			icon = ExtractFileIcon(GetSystemFile(L"cmd.exe"), 0, size);
+		}
+		else if (IsPowerShellScript(path))
+		{
+			// The console it runs in. A Store pwsh is an alias with no icon to read.
+			icon = ExtractFileIcon(FindShellProgram(ConsoleShell::PowerShell), 0, size);
+			if (icon == nullptr)
+			{
+				icon = ExtractFileIcon(GetSystemFile(L"WindowsPowerShell\\v1.0\\powershell.exe"), 0, size);
+			}
 		}
 		else if (EndsWithIgnoreCase(text, L".lnk"))
 		{

@@ -66,7 +66,7 @@ namespace apptray
 	std::wstring StripLaunchExtension(std::wstring_view fileName)
 	{
 		std::wstring_view stem = fileName;
-		for (const std::wstring_view extension : {L".exe", L".bat", L".cmd", L".jar", L".lnk"})
+		for (const std::wstring_view extension : {L".exe", L".bat", L".cmd", L".ps1", L".jar", L".lnk"})
 		{
 			if (EndsWithIgnoreCase(stem, extension))
 			{

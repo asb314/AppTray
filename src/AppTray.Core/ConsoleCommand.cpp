@@ -61,23 +61,6 @@ namespace apptray
 			return std::nullopt;
 		}
 
-		// A PowerShell literal: inside single quotes only quotes are special (doubled). PowerShell
-		// also takes the typographic single quotes as quotes.
-		std::wstring QuoteForPowerShell(std::wstring_view text)
-		{
-			std::wstring quoted = L"'";
-			for (const wchar_t c : text)
-			{
-				quoted.push_back(c);
-				if (c == L'\'' || c == L'\x2018' || c == L'\x2019' || c == L'\x201A' || c == L'\x201B')
-				{
-					quoted.push_back(c);
-				}
-			}
-			quoted.push_back(L'\'');
-			return quoted;
-		}
-
 		// Arguments written for a plain command line, made safe for cmd's own parsing: its
 		// operators outside quotes are escaped
 		std::wstring EscapeForCmd(std::wstring_view arguments)
@@ -98,6 +81,21 @@ namespace apptray
 			}
 			return escaped;
 		}
+	}
+
+	std::wstring QuoteForPowerShell(std::wstring_view text)
+	{
+		std::wstring quoted = L"'";
+		for (const wchar_t c : text)
+		{
+			quoted.push_back(c);
+			if (c == L'\'' || c == L'\x2018' || c == L'\x2019' || c == L'\x201A' || c == L'\x201B')
+			{
+				quoted.push_back(c);
+			}
+		}
+		quoted.push_back(L'\'');
+		return quoted;
 	}
 
 	ConsoleShell ParseConsoleShell(std::wstring_view setting)
@@ -159,17 +157,31 @@ namespace apptray
 		std::wstring script = std::format(
 			L"$env:Path = {} + $env:Path; Set-Location -LiteralPath {}", QuoteForPowerShell(folder + L";"),
 			QuoteForPowerShell(folder));
+		const bool isScript = program && IsPowerShellScript(*program);
 		if (program)
 		{
 			script += L"; & " + QuoteForPowerShell(program->wstring());
 			if (!arguments.empty())
 			{
-				// Stop-parsing token: the arguments reach the program as written, not as PowerShell
-				script += L" --% ";
+				// Stop-parsing token: the arguments reach the program as written, not as PowerShell.
+				// A script takes them as PowerShell, like any command typed in the console.
+				script += isScript ? L" " : L" --% ";
 				script += arguments;
 			}
 		}
-		command.parameters = L"-NoExit -NoLogo -Command " + QuoteArgument(script);
+		command.parameters = std::format(
+			L"-NoExit -NoLogo {}-Command {}", isScript ? L"-ExecutionPolicy Bypass " : L"", QuoteArgument(script));
 		return command;
+	}
+
+	bool IsPowerShellScript(const fs::path& file)
+	{
+		return EndsWithIgnoreCase(file.native(), L".ps1");
+	}
+
+	ConsoleCommand BuildScriptCommand(const fs::path& script, std::wstring_view arguments)
+	{
+		return BuildConsoleCommand(
+			ConsoleShell::PowerShell, FindShellProgram(ConsoleShell::PowerShell), script.parent_path(), script, arguments);
 	}
 }

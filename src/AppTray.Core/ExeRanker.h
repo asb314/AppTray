@@ -13,7 +13,8 @@ namespace apptray
 	{
 		None,
 		Exe,
-		Script,   // .bat / .cmd
+		Script,           // .bat / .cmd
+		PowerShellScript, // .ps1 (runs in a PowerShell console: the shell would open it in Notepad)
 		Jar,
 		Shortcut, // .lnk
 	};

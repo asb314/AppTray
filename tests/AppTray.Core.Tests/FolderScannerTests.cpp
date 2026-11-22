@@ -351,6 +351,57 @@ TEST(FolderScanner, Should_IgnorePortableAppsStart_When_ItPointsOutsideTheApp)
 	EXPECT_EQ(entry->target, L"Browser/FooPortable/FooPortable.exe");
 }
 
+TEST(FolderScanner, Should_ListPowerShellScripts_LooseAndAsTheirFoldersProgram)
+{
+	TestTree tree;
+	tree.Add(L"AdminShares.ps1");
+	tree.Add(L"Utils/System/WinUtil/winutil.ps1");
+	tree.Add(L"Utils/System/WinUtil/readme.txt");
+	tree.Add(L"Dev/Tool/Tool.exe");
+	tree.Add(L"Dev/Tool/Tool.dll");
+	tree.Add(L"Dev/Tool/build.ps1");
+
+	const ScanResult result = Scan(tree);
+
+	ASSERT_EQ(result.apps.size(), 3u);
+	const AppEntry* loose = Find(result, L"AdminShares.ps1");
+	ASSERT_NE(loose, nullptr);
+	EXPECT_EQ(loose->kind, AppKind::File);
+	EXPECT_EQ(loose->category, L"");
+	EXPECT_EQ(loose->name, L"AdminShares");
+	const AppEntry* winutil = Find(result, L"Utils/System/WinUtil");
+	ASSERT_NE(winutil, nullptr);
+	EXPECT_EQ(winutil->kind, AppKind::Folder);
+	EXPECT_EQ(winutil->target, L"Utils/System/WinUtil/winutil.ps1");
+	EXPECT_EQ(winutil->readme, L"Utils/System/WinUtil/readme.txt");
+	const AppEntry* tool = Find(result, L"Dev/Tool");
+	ASSERT_NE(tool, nullptr);
+	EXPECT_EQ(tool->target, L"Dev/Tool/Tool.exe");
+	ASSERT_EQ(tool->alternatives.size(), 1u);
+	EXPECT_EQ(tool->alternatives[0], L"Dev/Tool/build.ps1");
+}
+
+TEST(FolderScanner, Should_NotSplitAnApp_When_ItsSubfoldersHoldHelperScripts)
+{
+	TestTree tree;
+	tree.Add(L"Dev/Foo/bin/foo.exe");
+	tree.Add(L"Dev/Foo/scripts/setup-env.ps1");
+	tree.Add(L"Dev/Foo/scripts/install.ps1");
+	tree.Add(L"Dev/Bar/Bar.dll");
+	tree.Add(L"Dev/Bar/build.ps1");
+	tree.Add(L"Dev/notes.ps1");
+	tree.Add(L"Dev/Baz/Baz.exe");
+
+	const ScanResult result = Scan(tree);
+
+	// One Foo; Bar (DLLs and a build script) is no app; a loose script below the root is a helper
+	ASSERT_EQ(result.apps.size(), 2u);
+	const AppEntry* foo = Find(result, L"Dev/Foo");
+	ASSERT_NE(foo, nullptr);
+	EXPECT_EQ(foo->target, L"Dev/Foo/bin/foo.exe");
+	EXPECT_NE(Find(result, L"Dev/Baz"), nullptr);
+}
+
 TEST(FolderScanner, Should_ListRootShortcutsAndLooseInstallers)
 {
 	TestTree tree;
