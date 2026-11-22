@@ -52,6 +52,12 @@ namespace apptray
 			ElevatedCommand,
 			ShortcutDesktopCommand,
 			ShortcutStartMenuCommand,
+			NewCopyCommand,
+			CloseAppCommand,
+			OpenConsoleCommand,
+			FolderOnPathCommand,
+			KeywordsCommand,
+			InConsoleCommand,
 			AlternativeCommandBase = 100,
 		};
 
@@ -664,9 +670,19 @@ namespace apptray
 		{
 			const AppItem& item = app_.Items()[*index];
 			const std::wstring what = item.entry->description.empty() ? item.name : item.entry->description;
-			const std::wstring where = item.target.empty() ? std::wstring(text::OpensFolder) : item.target;
+			std::wstring where = item.target.empty() ? std::wstring(text::OpensFolder) : item.target;
+			// The scan's console flag is for its own choice of executable; the user's choice wins
+			if (item.console.value_or(
+					item.entry->console && !item.target.empty() && IsSameRelative(item.target, item.entry->target)))
+			{
+				where = std::format(L"{}  ·  {}", text::OpensInConsole, where);
+			}
 			text = item.entry->version.empty() ? std::format(L"{}  ·  {}", what, where)
 											   : std::format(L"{}  ·  v{}  ·  {}", what, item.entry->version, where);
+			if (item.running)
+			{
+				text = std::format(L"{}  ·  {}", text::RunningHint, text);
+			}
 		}
 		else if (noFolderMatch_)
 		{
@@ -692,11 +708,11 @@ namespace apptray
 		}
 	}
 
-	void LauncherWindow::LaunchSelected(bool asAdmin)
+	void LauncherWindow::LaunchSelected(bool asAdmin, bool newCopy)
 	{
 		if (const std::optional<size_t> index = GetSelectedItem())
 		{
-			app_.LaunchItem(*index, asAdmin);
+			app_.LaunchItem(*index, asAdmin, newCopy);
 		}
 	}
 
@@ -727,11 +743,28 @@ namespace apptray
 			ClientToScreen(list_, &point);
 		}
 
+		// Copied: commands below can rebuild the items
+		const bool running = item.running;
 		HMENU menu = CreatePopupMenu();
-		AppendMenuW(menu, MF_STRING, OpenCommand, text::Open);
+		AppendMenuW(menu, MF_STRING, OpenCommand, running ? text::GoToWindow : text::Open);
 		SetMenuDefaultItem(menu, OpenCommand, FALSE);
+		if (running)
+		{
+			AppendMenuW(menu, MF_STRING, NewCopyCommand, text::OpenAnotherCopy);
+		}
 		AppendMenuW(menu, MF_STRING | (isSuite ? MF_GRAYED : 0), OpenAsAdminCommand, text::OpenAsAdmin);
+		if (running)
+		{
+			AppendMenuW(menu, MF_STRING, CloseAppCommand, text::CloseApp);
+		}
+		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, OpenFolderCommand, text::OpenFolder);
+		AppendMenuW(menu, MF_STRING | (entry.missing ? MF_GRAYED : 0), OpenConsoleCommand, text::OpenConsoleHere);
+		const bool inConsole = app_.IsItemInConsole(index);
+		if (app_.HasConsoleChoice(index))
+		{
+			AppendMenuW(menu, MF_STRING | (inConsole ? MF_CHECKED : 0), InConsoleCommand, text::OpenInConsole);
+		}
 		if (!entry.readme.empty())
 		{
 			AppendMenuW(menu, MF_STRING, OpenHelpCommand, text::OpenHelp);
@@ -743,6 +776,7 @@ namespace apptray
 			menu, MF_POPUP | (entry.missing ? MF_GRAYED : 0), reinterpret_cast<UINT_PTR>(shortcut), text::CreateShortcut);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, FavoriteCommand, item.favorite ? text::RemoveFavorite : text::AddFavorite);
+		AppendMenuW(menu, MF_STRING, KeywordsCommand, text::KeywordsMenu);
 
 		const AppOverride* userOverride = app_.Settings().FindOverride(entry.id);
 		const bool hasTargetOverride = userOverride != nullptr && userOverride->target.has_value();
@@ -796,6 +830,10 @@ namespace apptray
 		AppendMenuW(
 			menu, MF_STRING | (elevated ? MF_CHECKED : 0) | (isProgram ? 0 : MF_GRAYED), ElevatedCommand,
 			text::RunWithoutUac);
+		const bool onPath = app_.IsItemFolderOnPath(index);
+		AppendMenuW(
+			menu, MF_STRING | (onPath ? MF_CHECKED : 0) | (entry.missing && !onPath ? MF_GRAYED : 0), FolderOnPathCommand,
+			text::FolderOnPath);
 		AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		AppendMenuW(menu, MF_STRING, item.hidden ? UnhideCommand : HideCommand, item.hidden ? text::Unhide : text::Hide);
 
@@ -812,6 +850,32 @@ namespace apptray
 			break;
 		case OpenAsAdminCommand:
 			app_.LaunchItem(index, true);
+			break;
+		case NewCopyCommand:
+			app_.LaunchItem(index, false, true);
+			break;
+		case CloseAppCommand:
+			app_.CloseItemWindows(index);
+			break;
+		case OpenConsoleCommand:
+			app_.OpenItemConsole(index);
+			break;
+		case FolderOnPathCommand:
+			app_.SetItemFolderOnPath(index, !onPath);
+			break;
+		case InConsoleCommand:
+			app_.SetItemInConsole(index, !inConsole);
+			break;
+		case KeywordsCommand:
+			holdOpen_ = true;
+			app_.EditItemKeywords(index, window_);
+			holdOpen_ = false;
+			// The dialog gives the activation back. If the focus went elsewhere meanwhile and cannot
+			// come back, the close that holdOpen_ held back happens now.
+			if (window_ != nullptr && GetForegroundWindow() != window_ && !SetForegroundWindow(window_))
+			{
+				RequestClose();
+			}
 			break;
 		case OpenFolderCommand:
 			app_.OpenItemFolder(index);
@@ -937,8 +1001,15 @@ namespace apptray
 			}
 			else
 			{
-				text = item.isNew ? std::format(L"{}  ·  {}", text::NewTag, FormatCategory(item.category))
-								  : FormatCategory(item.category);
+				text = FormatCategory(item.category);
+				if (item.isNew)
+				{
+					text = std::format(L"{}  ·  {}", text::NewTag, text);
+				}
+				if (item.running)
+				{
+					text = std::format(L"{}  ·  {}", text::RunningTag, text);
+				}
 			}
 			wcsncpy_s(info->item.pszText, static_cast<size_t>(info->item.cchTextMax), text.c_str(), _TRUNCATE);
 		}
@@ -1028,7 +1099,7 @@ namespace apptray
 			return 0;
 		}
 		case LVN_ITEMACTIVATE:
-			LaunchSelected(IsKeyDown(VK_CONTROL));
+			LaunchSelected(IsKeyDown(VK_CONTROL), IsKeyDown(VK_SHIFT));
 			return 0;
 		case NM_RCLICK:
 		{
@@ -1116,7 +1187,7 @@ namespace apptray
 				}
 				else
 				{
-					LaunchSelected(control);
+					LaunchSelected(control, shift);
 				}
 				return true;
 			case VK_DOWN:
@@ -1384,7 +1455,7 @@ namespace apptray
 			{
 				wasActive_ = true;
 			}
-			else if (wasActive_)
+			else if (wasActive_ && !holdOpen_)
 			{
 				PostMessageW(window, WM_CLOSE, 0, 0);
 			}

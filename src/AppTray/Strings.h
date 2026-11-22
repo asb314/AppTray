@@ -102,6 +102,7 @@ namespace apptray::text
 	inline constexpr Text AboutHotkeyInUse{L"{} (lo usa otro programa)", L"{} (in use by another program)"};
 	inline constexpr Text Close{L"Cerrar", L"Close"};
 	inline constexpr Text NewVersionMenu{L"Nueva versión {} disponible…", L"New version {} available…"};
+	inline constexpr Text RunningApps{L"Abiertas", L"Running"};
 	inline constexpr Text Exit{L"Salir", L"Exit"};
 
 	// Launcher window
@@ -118,6 +119,9 @@ namespace apptray::text
 	inline constexpr Text OpensFolder{L"abre la carpeta", L"opens the folder"};
 	inline constexpr Text NotFound{L"no encontrada", L"not found"};
 	inline constexpr Text NewTag{L"nueva", L"new"};
+	inline constexpr Text RunningTag{L"abierta", L"running"};
+	inline constexpr Text RunningHint{L"Abierta (Mayús+Intro abre otra copia)", L"Running (Shift+Enter opens another copy)"};
+	inline constexpr Text OpensInConsole{L"se abre en una consola", L"opens in a console"};
 	inline constexpr Text NoMatches{L"Nada coincide con la búsqueda", L"Nothing matches the search"};
 	inline constexpr Text Keys{
 		L"Intro abre · Ctrl+Intro admin · Ctrl+D favorito · F5 refrescar · F10 menú",
@@ -125,14 +129,20 @@ namespace apptray::text
 
 	// App context menu
 	inline constexpr Text Open{L"Abrir", L"Open"};
+	inline constexpr Text GoToWindow{L"Ir a su ventana", L"Switch to its window"};
+	inline constexpr Text OpenAnotherCopy{L"Abrir otra copia\tMayús+Intro", L"Open another copy\tShift+Enter"};
+	inline constexpr Text CloseApp{L"Cerrar", L"Close"};
 	inline constexpr Text OpenAsAdmin{L"Abrir como administrador", L"Open as administrator"};
 	inline constexpr Text OpenFolder{L"Abrir carpeta", L"Open folder"};
+	inline constexpr Text OpenConsoleHere{L"Abrir consola aquí", L"Open a console here"};
+	inline constexpr Text OpenInConsole{L"Abrir en una consola", L"Open in a console"};
 	inline constexpr Text OpenHelp{L"Ayuda", L"Help"};
 	inline constexpr Text CreateShortcut{L"Crear acceso directo", L"Create shortcut"};
 	inline constexpr Text ShortcutOnDesktop{L"En el escritorio", L"On the desktop"};
 	inline constexpr Text ShortcutInStartMenu{L"En el menú Inicio", L"In the Start menu"};
 	inline constexpr Text AddFavorite{L"Añadir a favoritos\tCtrl+D", L"Add to favorites\tCtrl+D"};
 	inline constexpr Text RemoveFavorite{L"Quitar de favoritos\tCtrl+D", L"Remove from favorites\tCtrl+D"};
+	inline constexpr Text KeywordsMenu{L"Palabras clave…", L"Keywords…"};
 	inline constexpr Text UseOtherExecutable{L"Usar otro ejecutable", L"Use another executable"};
 	inline constexpr Text ResetExecutable{L"Volver al que eligió AppTray", L"Back to AppTray's choice"};
 	inline constexpr Text ExpandSuite{L"Mostrar sus programas por separado", L"Show its programs separately"};
@@ -142,6 +152,7 @@ namespace apptray::text
 	inline constexpr Text AutostartAlways{L"Abrir siempre", L"Always open"};
 	inline constexpr Text AutostartAsk{L"Preguntar (casilla al iniciar)", L"Ask (checkbox at logon)"};
 	inline constexpr Text RunWithoutUac{L"Abrir sin UAC (tarea elevada)", L"Open without UAC (elevated task)"};
+	inline constexpr Text FolderOnPath{L"Su carpeta en el PATH", L"Its folder on the PATH"};
 	inline constexpr Text Hide{L"Ocultar", L"Hide"};
 	inline constexpr Text Unhide{L"Volver a mostrar", L"Show again"};
 
@@ -195,6 +206,17 @@ namespace apptray::text
 	inline constexpr Text HotkeyTaken{
 		L"{} ya lo usa otro programa: cambia «hotkey» en user.json",
 		L"{} is used by another program: change \"hotkey\" in user.json"};
+	inline constexpr Text CloseBlocked{
+		L"{} se abrió como administrador: ciérrala desde su ventana",
+		L"{} runs as administrator: close it from its own window"};
+	inline constexpr Text NoWindowToClose{
+		L"{} no tiene ventanas abiertas (puede estar en la bandeja)", L"{} has no open windows (it may be in the tray)"};
+	inline constexpr Text PathTitle{L"PATH", L"PATH"};
+	inline constexpr Text PathAdded{
+		L"La carpeta de {} está en el PATH: sus programas funcionan en las consolas que abras desde ahora",
+		L"The folder of {} is on the PATH: its programs work in the consoles you open from now on"};
+	inline constexpr Text PathRemoved{L"La carpeta de {} ya no está en el PATH", L"The folder of {} is no longer on the PATH"};
+	inline constexpr Text PathFailed{L"No se pudo cambiar el PATH", L"Could not change the PATH"};
 	inline constexpr Text RenamedAppsTitle{L"Apps actualizadas", L"Apps updated"};
 	inline constexpr Text RenamedAppsText{
 		L"Tus ajustes pasan a la carpeta nueva de: {}", L"Your settings move to the new folder of: {}"};
@@ -208,6 +230,14 @@ namespace apptray::text
 	inline constexpr Text CountdownStopped{L"Pulsa Abrir para continuar", L"Press Open to continue"};
 	inline constexpr Text OpenButton{L"Abrir", L"Open"};
 	inline constexpr Text NoneButton{L"Ninguna", L"None"};
+
+	// Keywords dialog
+	inline constexpr Text KeywordsTitle{L"Palabras clave", L"Keywords"};
+	inline constexpr Text KeywordsLabel{
+		L"Otras palabras con las que encontrar {} al buscar, separadas por espacios:",
+		L"Other words to find {} by when searching, separated by spaces:"};
+	inline constexpr Text OkButton{L"Aceptar", L"OK"};
+	inline constexpr Text CancelButton{L"Cancelar", L"Cancel"};
 }
 
 // A text as a std::format argument, in the current language

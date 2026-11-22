@@ -25,6 +25,8 @@ namespace apptray
 		std::optional<std::wstring> category;
 		std::optional<std::wstring> target; // another executable, relative to the root
 		std::optional<std::wstring> args;
+		std::optional<std::wstring> keywords; // more words to find it by when searching
+		std::optional<bool> console;        // open it inside a console (default: when it is a console program)
 		bool expand = false;                // a suite listed as separate apps
 		AutostartMode autostart = AutostartMode::No;
 		bool askDefault = false;            // checked in the logon dialog
@@ -51,6 +53,7 @@ namespace apptray
 		bool checkForUpdates = true; // once a day, ask GitHub whether a newer release exists
 		std::wstring hotkey = L"Ctrl+Alt+Space"; // opens the launcher from anywhere; empty = none
 		std::wstring language = L"auto";         // UI texts: "es", "en", or "auto" (Windows' language)
+		std::wstring shell = L"powershell";      // consoles AppTray opens: "powershell" or "cmd"
 		ScanSettings scan;
 		std::vector<std::wstring> favorites;
 		std::map<std::wstring, AppOverride> apps;
@@ -73,6 +76,8 @@ namespace apptray
 	void SetAutostart(UserSettings& settings, const std::wstring& id, AutostartMode mode);
 	void SetAskDefault(UserSettings& settings, const std::wstring& id, bool checked);
 	void SetElevatedTask(UserSettings& settings, const std::wstring& id, bool enabled);
+	void SetKeywords(UserSettings& settings, const std::wstring& id, const std::wstring& keywords); // "" removes them
+	void SetConsoleChoice(UserSettings& settings, const std::wstring& id, std::optional<bool> console); // nullopt: default
 
 	// A missing file gives the defaults (no error). A broken file gives the defaults and an error.
 	UserSettings LoadUserSettings(const std::filesystem::path& file, std::wstring& error);

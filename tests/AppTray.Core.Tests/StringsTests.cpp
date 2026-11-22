@@ -65,6 +65,11 @@ TEST(Strings, Should_TakeTheSameArgumentsInEveryLanguage)
 		{text::HotkeyTaken, 1},
 		{text::RenamedAppsText, 1},
 		{text::RenamedAppsReenable, 1},
+		{text::CloseBlocked, 1},
+		{text::NoWindowToClose, 1},
+		{text::PathAdded, 1},
+		{text::PathRemoved, 1},
+		{text::KeywordsLabel, 1},
 	};
 	for (const text::Language language : {text::Language::Spanish, text::Language::English})
 	{

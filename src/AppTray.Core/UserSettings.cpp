@@ -68,6 +68,33 @@ namespace apptray
 			return array;
 		}
 
+		// "keywords": a string of words, or (written by hand) an array of them
+		std::optional<std::wstring> ReadKeywords(const Json& json)
+		{
+			const auto found = json.find("keywords");
+			if (found == json.end())
+			{
+				return std::nullopt;
+			}
+			std::wstring words;
+			if (found->is_string())
+			{
+				words = FromUtf8(found->get_ref<const std::string&>());
+			}
+			else if (found->is_array())
+			{
+				for (const Json& word : *found)
+				{
+					if (word.is_string())
+					{
+						words += (words.empty() ? L"" : L" ") + FromUtf8(word.get_ref<const std::string&>());
+					}
+				}
+			}
+			words = Trim(words);
+			return words.empty() ? std::nullopt : std::optional<std::wstring>(words);
+		}
+
 		AppOverride ParseOverride(const Json& json)
 		{
 			AppOverride item;
@@ -76,6 +103,11 @@ namespace apptray
 			item.category = GetOptionalString(json, "category");
 			item.target = GetOptionalString(json, "target");
 			item.args = GetOptionalString(json, "args");
+			item.keywords = ReadKeywords(json);
+			if (const auto console = json.find("console"); console != json.end() && console->is_boolean())
+			{
+				item.console = console->get<bool>();
+			}
 			item.expand = GetBool(json, "expand");
 			item.autostart = ParseAutostart(GetString(json, "autostart"));
 			item.askDefault = GetBool(json, "askDefault");
@@ -113,6 +145,15 @@ namespace apptray
 			setString("category", item.category);
 			setString("target", item.target);
 			setString("args", item.args);
+			setString("keywords", item.keywords);
+			if (item.console)
+			{
+				json["console"] = *item.console;
+			}
+			else
+			{
+				json.erase("console");
+			}
 			setBool("expand", item.expand);
 			if (item.autostart != AutostartMode::No)
 			{
@@ -130,7 +171,7 @@ namespace apptray
 
 	bool AppOverride::IsEmpty() const
 	{
-		return !hidden && !name && !category && !target && !args && !expand
+		return !hidden && !name && !category && !target && !args && !keywords && !console && !expand
 			&& autostart == AutostartMode::No && !askDefault && !elevatedTask;
 	}
 
@@ -248,6 +289,18 @@ namespace apptray
 		ChangeOverride(settings, id, [&](AppOverride& item) { item.elevatedTask = enabled; });
 	}
 
+	void SetKeywords(UserSettings& settings, const std::wstring& id, const std::wstring& keywords)
+	{
+		std::wstring words = Trim(keywords);
+		ChangeOverride(settings, id, [&](AppOverride& item)
+			{ item.keywords = words.empty() ? std::nullopt : std::optional<std::wstring>(std::move(words)); });
+	}
+
+	void SetConsoleChoice(UserSettings& settings, const std::wstring& id, std::optional<bool> console)
+	{
+		ChangeOverride(settings, id, [&](AppOverride& item) { item.console = console; });
+	}
+
 	UserSettings LoadUserSettings(const fs::path& file, std::wstring& error)
 	{
 		UserSettings settings;
@@ -274,6 +327,7 @@ namespace apptray
 		settings.checkForUpdates = GetBool(document, "checkForUpdates", settings.checkForUpdates);
 		settings.hotkey = Trim(GetString(document, "hotkey", settings.hotkey));
 		settings.language = ToLower(Trim(GetString(document, "language", settings.language)));
+		settings.shell = ToLower(Trim(GetString(document, "shell", settings.shell)));
 		if (const auto scan = document.find("scan"); scan != document.end() && scan->is_object())
 		{
 			settings.scan.maxDepth = std::clamp(GetInt(*scan, "maxDepth", settings.scan.maxDepth), 1, 20);
@@ -319,6 +373,7 @@ namespace apptray
 		json["checkForUpdates"] = settings.checkForUpdates;
 		json["hotkey"] = ToJson(settings.hotkey);
 		json["language"] = ToJson(settings.language);
+		json["shell"] = ToJson(settings.shell);
 
 		Json scan = json.contains("scan") && json["scan"].is_object() ? json["scan"] : Json::object();
 		scan["maxDepth"] = settings.scan.maxDepth;

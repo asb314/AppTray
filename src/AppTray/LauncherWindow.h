@@ -74,7 +74,7 @@ namespace apptray
 		std::optional<int> GetSelectedRow() const;
 		void SelectRow(int row);
 		void MoveSelection(int delta);
-		void LaunchSelected(bool asAdmin);
+		void LaunchSelected(bool asAdmin, bool newCopy = false);
 		void ShowContextMenu(std::optional<POINT> screenPoint);
 		void ShowAppTrayMenu(); // the tray icon's menu, below the menu button
 		int GetImageIndex(size_t itemIndex);
@@ -118,6 +118,7 @@ namespace apptray
 		std::wstring selectedId_; // survives a rebuild of the items (indices do not)
 		std::wstring statusOverride_;
 		bool wasActive_ = false;
+		bool holdOpen_ = false; // a modal dialog of its own is up: losing the focus to it must not close it
 		ULONGLONG closedAt_ = 0;
 	};
 }

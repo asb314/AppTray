@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,7 +30,10 @@ namespace apptray
 		bool elevatedTask = false;       // started through its own elevated scheduled task
 		int launchCount = 0;             // opened from AppTray (usage.json)
 		std::wstring lastLaunched;       // UTC, empty if never
-		std::wstring searchText;         // folded name, id, description and category
+		bool running = false;            // one of its processes runs (the tray sets it from a snapshot)
+		std::optional<bool> console;     // the user's choice: open it inside a console or not
+		std::wstring keywords;           // the user's extra search words, folded, separated by spaces
+		std::wstring searchText;         // folded name, id, description, category and keywords
 		std::wstring initials;           // of the name's words, folded: "fsiv fiv" (FastStone Image Viewer)
 	};
 
@@ -60,11 +64,11 @@ namespace apptray
 		std::wstring search; // words separated by spaces; all must match (case and accents ignored)
 	};
 
-	// Indices into items. A search word matches anywhere in the name, folder, description or
-	// category, or the start of the name's initials ("vsc" -> Visual Studio Code). Sorted by name;
-	// with a search, names starting with the first word come first, then names whose initials do,
-	// and within each group the apps opened most often. Favorites keep the user's order, Recent
-	// its time order.
+	// Indices into items. A search word matches anywhere in the name, folder, description, category
+	// or keywords, or the start of the name's initials ("vsc" -> Visual Studio Code). Sorted by
+	// name; with a search, names or keywords starting with the first word come first, then names
+	// whose initials do, and within each group the apps opened most often. Favorites keep the
+	// user's order, Recent its time order.
 	std::vector<size_t> FilterAppItems(
 		const std::vector<AppItem>& items, const AppFilter& filter, const std::vector<std::wstring>& favorites);
 
@@ -90,6 +94,17 @@ namespace apptray
 
 	// Counts for the fixed filters, to show or hide them in the UI
 	size_t CountAppItems(const std::vector<AppItem>& items, AppFilterKind kind);
+
+	// Where an app shows among running processes (path relative to the root): folder apps and
+	// PortableApps by any program inside their folder (their launchers start the real program from
+	// a subfolder), the rest by their executable. Nothing for a suite, which opens a folder.
+	struct ProcessScope
+	{
+		std::wstring path;
+		bool isFolder = false;
+	};
+
+	std::optional<ProcessScope> GetProcessScope(const AppItem& item);
 
 	// What to do at logon: apps set to "always" to open now, apps set to "ask" to offer in the
 	// dialog. Apps already running, missing, hidden or without an executable are left out.

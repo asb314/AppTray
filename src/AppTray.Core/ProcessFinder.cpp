@@ -8,17 +8,15 @@
 
 #include <wil/resource.h>
 
-#include <algorithm>
-
 namespace apptray
 {
-	std::vector<std::wstring> GetRunningImagePaths()
+	std::vector<RunningProcess> GetRunningProcesses()
 	{
-		std::vector<std::wstring> paths;
+		std::vector<RunningProcess> processes;
 		wil::unique_handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
 		if (!snapshot || snapshot.get() == INVALID_HANDLE_VALUE)
 		{
-			return paths;
+			return processes;
 		}
 		PROCESSENTRY32W entry{};
 		entry.dwSize = sizeof(entry);
@@ -33,13 +31,14 @@ namespace apptray
 			DWORD length = static_cast<DWORD>(std::size(buffer));
 			if (QueryFullProcessImageNameW(process.get(), 0, buffer, &length))
 			{
-				paths.push_back(ToLower(std::wstring_view(buffer, length)));
+				processes.push_back({entry.th32ProcessID, ToLower(std::wstring_view(buffer, length))});
 			}
 		}
-		return paths;
+		return processes;
 	}
 
-	bool IsAppRunning(const std::vector<std::wstring>& runningImages, const std::filesystem::path& path, bool isFolder)
+	std::vector<unsigned long> FindAppProcesses(
+		const std::vector<RunningProcess>& processes, const std::filesystem::path& path, bool isFolder)
 	{
 		std::wstring target = ToLower(path.lexically_normal().wstring());
 		if (isFolder)
@@ -48,10 +47,16 @@ namespace apptray
 			{
 				target.pop_back();
 			}
-			target += L'\\';
-			return std::any_of(
-				runningImages.begin(), runningImages.end(), [&](const std::wstring& image) { return image.starts_with(target); });
+			target += L'\\'; // "C:\Apps\Foo" must not match a process in "C:\Apps\FooBar"
 		}
-		return std::find(runningImages.begin(), runningImages.end(), target) != runningImages.end();
+		std::vector<unsigned long> ids;
+		for (const RunningProcess& process : processes)
+		{
+			if (isFolder ? process.image.starts_with(target) : process.image == target)
+			{
+				ids.push_back(process.id);
+			}
+		}
+		return ids;
 	}
 }

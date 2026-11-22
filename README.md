@@ -8,9 +8,10 @@ to search, browse by category, keep favorites and launch.
 The interface is in Spanish when Windows is in Spanish and in English otherwise;
 `"language": "es"` or `"en"` in `user.json` forces one (`"auto"` is the default).
 
-> Status: **phase 4** — tray icon, launcher, tray menu, apps at logon, elevated apps without a
-> UAC prompt, a global hotkey, recent apps, search by initials, settings that follow an app to
-> its new version folder, shortcuts and app versions work.
+> Status: **phase 5** — tray icon, launcher, tray menu, apps at logon, elevated apps without a
+> UAC prompt, a global hotkey, recent apps, search by initials and keywords, settings that follow
+> an app to its new version folder, shortcuts, app versions, running apps (switch to their
+> window, close), command-line tools in a console and app folders on the PATH work.
 
 ## Build
 
@@ -67,13 +68,41 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 	- **App search** (right, Ctrl+F) looks inside the chosen folder and its subfolders (from
 		Favorites, Recent, New or All it looks everywhere). Each app shows its folder path. A
 		word also matches the start of the name's initials: "vsc" finds Visual Studio Code,
-		"fsiv" FastStone Image Viewer. Names (or initials) starting with the first word come
-		first, and among them the apps you open most.
+		"fsiv" FastStone Image Viewer. Right click › "Keywords…" gives an app more words to be
+		found by ("retouch" for GIMP; `"keywords"` in `user.json`). Names or keywords starting
+		with the first word come first, then names whose initials do, and within each group the
+		apps you open most.
+	- **Running apps** show "running" next to their folder and in the status line (same test
+		as at logon, below). Enter switches to the app's window (restored if minimized) instead
+		of starting a second copy; Shift+Enter, or right click › "Open another copy", starts
+		another. Right click › "Close" asks its windows to close, as their X button does (the
+		app may still ask to save). In a folder app the windows of its chosen executable come
+		first; the folder's other programs only count when that one has none (a launcher's real
+		program). An app with no window (only in the tray, or just a helper process) starts as
+		usual, so a single-instance app shows itself. Switching counts as opening it for Recent
+		and the ranking. The state is read when the launcher or the tray menu opens.
+	- **Command-line programs** (console executables such as ffmpeg or yt-dlp, which would
+		flash a window that closes at once) open inside a console that stays open, in their
+		folder and with that folder first in `PATH`: you see their output and can type the next
+		command. `"shell"` in `user.json` picks it: `"powershell"` (default: PowerShell 7 when
+		installed, else Windows PowerShell) or `"cmd"`. With Windows Terminal as the default
+		terminal it opens there. Its arguments (`"args"`) reach it as written. Scripts (`.bat`,
+		`.cmd`) open as always, and logon apps start directly. A console program that opens a
+		window of its own (Blender) would leave the console behind: right click › "Open in a
+		console" turns this off (or on) for that app (`"console": false|true` in `user.json`).
+		Right click › "Open a console here" opens one in any app's folder without running
+		anything.
+	- Right click › "Its folder on the PATH" adds the folder of the app's executable (a
+		suite's folder) to your user `PATH` (`HKCU\Environment`), or takes it out; the check
+		mark shows whether it is there, also when added by hand. Consoles opened from then on,
+		and programs AppTray starts, find its programs by name. When a refresh recognizes a
+		renamed version folder, `PATH` entries inside the old folder move to the new one.
 	- **Recent** lists the last 15 apps opened from AppTray (launcher or tray menu; the logon
 		apps do not count). The status line shows the selected app's description, version (from
 		its executable, or from the folder name for scripts) and target.
-	- Enter opens (from the folder side it moves to the apps), Ctrl+Enter opens as
-		administrator, Ctrl+D toggles a favorite, Ctrl+E opens the folder, F5 rescans, Esc clears
+	- Enter opens (from the folder side it moves to the apps; a running app: its window),
+		Shift+Enter opens another copy, Ctrl+Enter opens as administrator, Ctrl+D toggles a
+		favorite, Ctrl+E opens the folder, F5 rescans, Esc clears
 		a search or closes, Tab moves between the boxes, the tree and the list. Typing in the tree
 		goes to the folder search, typing in the list to the app search. The button at the top
 		right (or F10) opens the tray icon's menu (Refresh, Edit settings, Exit...) without
@@ -82,8 +111,10 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 		a shortcut on the desktop or in the Start menu (`Programs\AppTray`, so Windows search
 		finds the app; a shortcut of the same name that opens something else is kept and the new
 		one is named "Name (2)"; it starts the program directly, so an app with "Open without UAC"
-		shows its UAC prompt from there), what to do at logon, open without a UAC prompt.
-- **Right click**: favorites, the last 5 apps opened (other than favorites), categories as menus,
+		shows its UAC prompt from there), what to do at logon, open without a UAC prompt, and the
+		running-app, console, PATH and keywords commands above.
+- **Right click**: favorites, the last 5 apps opened (other than favorites), "Running" (the apps
+	open now: a click switches to them), categories as menus,
 	Refresh, Edit settings, Start with Windows, Check for a new version, About (version, the
 	hotkey, links to this repository and to the data folder), Exit, and "New version …
 	available" when there is one.
@@ -190,10 +221,13 @@ exists (`--check-update`).
 	`"categoryDepth"` sets how many folder levels become categories: `0` (default) the whole
 	tree, `1` only the top-level folders (each holding all its apps), `2` one sublevel...
 	`"hotkey"` is the global shortcut (default `"Ctrl+Alt+Space"`, `""` = none). `"language"`:
-	`"auto"` (Windows' language), `"es"` or `"en"`.
+	`"auto"` (Windows' language), `"es"` or `"en"`. `"shell"`: the console for command-line
+	programs, `"powershell"` (default) or `"cmd"`.
 	Per app, under `"apps"`: `"autostart": "always"|"ask"` (absent = no), `"askDefault"`
 	(checkbox state in the logon dialog), `"elevatedTask"` (set by "Open without UAC"; do not
-	set it by hand), `"args"`, `"target"`, `"hidden"`, `"name"`, `"category"`, `"expand"`.
+	set it by hand), `"args"`, `"target"`, `"hidden"`, `"name"`, `"category"`, `"expand"`,
+	`"keywords"` (words separated by spaces; an array of words works too), `"console"`
+	(`false`: a console program opens directly; `true`: any executable opens in a console).
 - `user.json.bak` — the previous version of `user.json`, written before each change (by AppTray,
 	or by hand: then from what AppTray had loaded). If an edit goes wrong, copy it back.
 - `usage.json` — how many times and when each app was opened from AppTray (Recent, ranking).
@@ -213,6 +247,11 @@ exists (`--check-update`).
 - The tray icon is registered with a GUID derived from the exe's folder, so Windows keeps its
 	place in the taskbar across restarts. If Windows refuses the GUID (a stale registration of
 	an exe that moved), AppTray falls back to a plain icon id.
+- "Close" cannot reach an app that runs as administrator while AppTray does not (Windows drops
+	the message); AppTray says so. Switching to a window needs the foreground, which AppTray has
+	right after your click or key; if Windows refuses it, the app's taskbar button flashes.
+- A `PATH` change reaches consoles opened afterwards. A terminal already open keeps its old
+	environment (Windows Terminal reloads it for new tabs once it gets the change notice).
 - On keyboards with AltGr (Spanish and most European layouts) AltGr is Ctrl+Alt: a hotkey such
 	as Ctrl+Alt+E would take the € key from every program. Ctrl+Alt+Space, the default, is safe.
 - Light/dark follows Windows' app mode. `APPTRAY_THEME=light` or `dark` forces one (testing).

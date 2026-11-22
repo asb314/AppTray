@@ -88,28 +88,54 @@ namespace apptray
 			return result;
 		}
 
-		// A search word of two letters or more that starts one of the initials variants
-		bool MatchesInitials(std::wstring_view initials, std::wstring_view word)
+		// A word that starts one of the space-separated words of a list
+		bool StartsAnyWord(std::wstring_view words, std::wstring_view word)
 		{
-			if (word.size() < 2)
+			if (word.empty())
 			{
 				return false;
 			}
 			size_t start = 0;
-			while (start < initials.size())
+			while (start < words.size())
 			{
-				size_t end = initials.find(L' ', start);
+				size_t end = words.find(L' ', start);
 				if (end == std::wstring_view::npos)
 				{
-					end = initials.size();
+					end = words.size();
 				}
-				if (initials.substr(start, end - start).starts_with(word))
+				if (words.substr(start, end - start).starts_with(word))
 				{
 					return true;
 				}
 				start = end + 1;
 			}
 			return false;
+		}
+
+		// A search word of two letters or more that starts one of the initials variants
+		bool MatchesInitials(std::wstring_view initials, std::wstring_view word)
+		{
+			return word.size() >= 2 && StartsAnyWord(initials, word);
+		}
+
+		// Keywords as typed ("retoque, fotos") -> "retoque fotos"
+		std::wstring FoldKeywords(std::wstring_view keywords)
+		{
+			std::wstring spaced(keywords);
+			std::replace_if(spaced.begin(), spaced.end(), [](wchar_t c) { return c == L',' || c == L';' || c == L'\t'; }, L' ');
+			std::wstring folded;
+			for (const wchar_t c : FoldForSearch(spaced))
+			{
+				if (c != L' ' || (!folded.empty() && folded.back() != L' '))
+				{
+					folded.push_back(c);
+				}
+			}
+			while (!folded.empty() && folded.back() == L' ')
+			{
+				folded.pop_back();
+			}
+			return folded;
 		}
 
 		bool IsInCategory(const std::wstring& category, const std::wstring& path)
@@ -177,6 +203,8 @@ namespace apptray
 				}
 				item.target = user.target.value_or(item.target);
 				item.args = user.args.value_or(L"");
+				item.keywords = FoldKeywords(user.keywords.value_or(L""));
+				item.console = user.console;
 				item.autostart = user.autostart;
 				item.askDefault = user.askDefault;
 				item.elevatedTask = user.elevatedTask;
@@ -187,6 +215,10 @@ namespace apptray
 				item.lastLaunched = used->lastLaunched;
 			}
 			item.searchText = FoldForSearch(item.name + L" " + entry.id + L" " + entry.description + L" " + item.category);
+			if (!item.keywords.empty())
+			{
+				item.searchText += L" " + item.keywords;
+			}
 			item.initials = MakeInitials(item.name);
 			items.push_back(std::move(item));
 		}
@@ -245,7 +277,7 @@ namespace apptray
 		struct Ranked
 		{
 			size_t index = 0;
-			int match = 0;    // 2: the name starts with the first word (searchText does); 1: its initials
+			int match = 0;    // 2: the name (searchText does) or a keyword starts with the first word; 1: initials
 			int launches = 0; // only counts while searching
 		};
 		const std::wstring first = words.empty() ? std::wstring{} : words.front();
@@ -254,10 +286,10 @@ namespace apptray
 		for (const size_t index : result)
 		{
 			const AppItem& item = items[index];
-			const int match = first.empty()                       ? 0
-				: item.searchText.starts_with(first)             ? 2
-				: MatchesInitials(item.initials, first)          ? 1
-																 : 0;
+			const int match = first.empty()                                                    ? 0
+				: item.searchText.starts_with(first) || StartsAnyWord(item.keywords, first) ? 2
+				: MatchesInitials(item.initials, first)                                       ? 1
+				                                                                              : 0;
 			ranked.push_back({index, match, first.empty() ? 0 : item.launchCount});
 		}
 		std::stable_sort(ranked.begin(), ranked.end(), [&](const Ranked& a, const Ranked& b)
@@ -392,6 +424,19 @@ namespace apptray
 		const size_t count = static_cast<size_t>(
 			std::count_if(items.begin(), items.end(), [&](const AppItem& item) { return MatchesKind(item, filter); }));
 		return kind == AppFilterKind::Recent ? std::min(count, RecentAppLimit) : count;
+	}
+
+	std::optional<ProcessScope> GetProcessScope(const AppItem& item)
+	{
+		if (item.target.empty())
+		{
+			return std::nullopt;
+		}
+		if (item.entry->kind == AppKind::Folder || item.entry->kind == AppKind::PortableApps)
+		{
+			return ProcessScope{item.entry->id, true};
+		}
+		return ProcessScope{item.target, false};
 	}
 
 	AutostartPlan PlanAutostart(const std::vector<AppItem>& items, const std::function<bool(const AppItem&)>& isRunning)

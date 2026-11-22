@@ -39,9 +39,10 @@ namespace apptray
 		}
 	}
 
-	LaunchResult LaunchProgram(const fs::path& target, std::wstring_view arguments, bool asAdmin)
+	LaunchResult LaunchProgram(const fs::path& target, std::wstring_view arguments, bool asAdmin, const fs::path& directory)
 	{
-		return Execute(asAdmin ? L"runas" : nullptr, target, std::wstring(arguments), target.parent_path());
+		return Execute(
+			asAdmin ? L"runas" : nullptr, target, std::wstring(arguments), directory.empty() ? target.parent_path() : directory);
 	}
 
 	LaunchResult OpenWithShell(const fs::path& path)

@@ -2,8 +2,11 @@
 
 #include "AppLauncher.h"
 #include "CatalogMerger.h"
+#include "AppWindows.h"
 #include "CommandLine.h"
+#include "ConsoleCommand.h"
 #include "ElevatedTask.h"
+#include "ExeInspector.h"
 #include "Hotkey.h"
 #include "IconLoader.h"
 #include "JsonFile.h"
@@ -11,6 +14,8 @@
 #include "LogonRegistration.h"
 #include "ProcessFinder.h"
 #include "StartupPrompt.h"
+#include "TextPrompt.h"
+#include "UserPath.h"
 #include "Version.h"
 #include "Strings.h"
 #include "StringUtil.h"
@@ -24,6 +29,7 @@
 
 #include <algorithm>
 #include <format>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -228,6 +234,74 @@ namespace apptray
 	void TrayApp::RebuildItems()
 	{
 		items_ = BuildAppItems(catalog_, settings_, FormatUtcNow(), &usage_);
+		// From the last process snapshot, taken when the launcher or the tray menu opened
+		for (AppItem& item : items_)
+		{
+			item.running = std::any_of(
+				runningIds_.begin(), runningIds_.end(), [&](const std::wstring& id) { return IsSameRelative(id, item.entry->id); });
+		}
+	}
+
+	void TrayApp::RefreshRunningApps()
+	{
+		const std::vector<RunningProcess> processes = GetRunningProcesses();
+		runningIds_.clear();
+		for (AppItem& item : items_)
+		{
+			item.running = !item.entry->missing && !FindItemProcesses(item, processes).empty();
+			if (item.running)
+			{
+				runningIds_.push_back(item.entry->id);
+			}
+		}
+	}
+
+	std::vector<unsigned long> TrayApp::FindItemProcesses(
+		const AppItem& item, const std::vector<RunningProcess>& processes) const
+	{
+		const std::optional<ProcessScope> scope = GetProcessScope(item);
+		if (!scope)
+		{
+			return {};
+		}
+		const std::optional<fs::path> path = ResolvePath(scope->path);
+		return path ? FindAppProcesses(processes, *path, scope->isFolder) : std::vector<unsigned long>{};
+	}
+
+	// Apps with a window open come to it, like a taskbar button. Without one (a background
+	// helper, an app in the tray) it starts as usual: single-instance apps show their window then.
+	// The windows of a running app. In a folder app, those of its chosen executable when it has
+	// any; only otherwise those of the folder's other programs (a launcher's real program, such as
+	// PortableApps' or Fiji's), so a second tool of the same folder is not taken for it.
+	std::vector<HWND> TrayApp::FindItemWindows(const AppItem& item) const
+	{
+		const std::vector<RunningProcess> processes = GetRunningProcesses();
+		const std::optional<ProcessScope> scope = GetProcessScope(item);
+		if (scope && scope->isFolder && EndsWithIgnoreCase(item.target, L".exe"))
+		{
+			if (const std::optional<fs::path> target = ResolvePath(item.target))
+			{
+				std::vector<HWND> windows = FindMainWindows(FindAppProcesses(processes, *target, false));
+				if (!windows.empty())
+				{
+					return windows;
+				}
+			}
+		}
+		return FindMainWindows(FindItemProcesses(item, processes));
+	}
+
+	bool TrayApp::ActivateItemWindow(const AppItem& item)
+	{
+		const std::vector<HWND> windows = FindItemWindows(item);
+		if (windows.empty())
+		{
+			return false;
+		}
+		// If Windows refuses the foreground it flashes the window's taskbar button instead
+		ActivateWindow(windows.front());
+		WriteLog(L"switched to " + item.name);
+		return true;
 	}
 
 	void TrayApp::SaveUsage()
@@ -246,17 +320,28 @@ namespace apptray
 	{
 		bool pending = false;
 		bool usageMoved = false;
+		std::vector<std::pair<fs::path, fs::path>> movedFolders;
 		for (const AppEntry& entry : catalog_.apps)
 		{
 			if (!entry.renamedFrom.empty() && !entry.missing)
 			{
 				pending = true;
 				usageMoved = MoveUsage(usage_, entry.renamedFrom, entry.id) || usageMoved;
+				const std::optional<fs::path> from = ResolvePath(entry.renamedFrom);
+				const std::optional<fs::path> to = ResolvePath(entry.id);
+				if (from && to)
+				{
+					movedFolders.emplace_back(*from, *to);
+				}
 			}
 		}
 		if (usageMoved)
 		{
 			SaveUsage();
+		}
+		if (!movedFolders.empty())
+		{
+			MoveUserPathEntries(movedFolders);
 		}
 		if (!pending)
 		{
@@ -293,6 +378,42 @@ namespace apptray
 			message += text::Format(text::RenamedAppsReenable, reenable);
 		}
 		return Notice{text::RenamedAppsTitle.Get(), std::move(message), !reenable.empty()};
+	}
+
+	// PATH entries inside a renamed app folder follow it, as the user's settings do
+	void TrayApp::MoveUserPathEntries(const std::vector<std::pair<fs::path, fs::path>>& folders)
+	{
+		std::wstring error;
+		std::optional<UserPath> path = ReadUserPath(error);
+		if (!path)
+		{
+			WriteLog(L"PATH: " + error);
+			return;
+		}
+		std::wstring list = path->list;
+		for (const auto& [from, to] : folders)
+		{
+			list = RebasePathEntries(list, from.wstring(), to.wstring());
+		}
+		if (list == path->list)
+		{
+			return;
+		}
+		path->list = std::move(list);
+		if (!WriteUserPath(*path, error))
+		{
+			WriteLog(L"PATH: " + error);
+			return;
+		}
+		WriteLog(L"PATH: entries moved to the renamed folders");
+		AnnouncePathChange();
+	}
+
+	void TrayApp::AnnouncePathChange()
+	{
+		RefreshProcessPath(); // consoles AppTray opens next see it at once
+		// Explorer and terminals reload their environment; this waits for every window to answer
+		std::thread(&AnnounceEnvironmentChange).detach();
 	}
 
 	// A tray notification; before the icon exists (LoadData runs in the constructor) the last one
@@ -496,7 +617,20 @@ namespace apptray
 				return {false, true, 0};
 			}
 		}
-		const LaunchResult result = item.target.empty() ? OpenWithShell(*path) : LaunchProgram(*path, item.args, asAdmin);
+		LaunchResult result;
+		if (item.target.empty())
+		{
+			result = OpenWithShell(*path);
+		}
+		else if (!atLogon && OpensInConsole(item) && fs::is_regular_file(*path, missing))
+		{
+			// A command-line tool would flash a console that closes at once: it runs in one that stays
+			result = StartInConsole(path->parent_path(), *path, item.args, asAdmin);
+		}
+		else
+		{
+			result = LaunchProgram(*path, item.args, asAdmin);
+		}
 		if (result.started)
 		{
 			WriteLog(std::format(L"started {}{}", path->wstring(), asAdmin ? L" (admin)" : L""));
@@ -504,28 +638,242 @@ namespace apptray
 		return result;
 	}
 
-	void TrayApp::LaunchItem(size_t index, bool asAdmin)
+	// A console-subsystem executable: the scan's flag for its own pick, else its PE header (not on
+	// a network root, where a share that hangs would freeze the UI thread)
+	bool TrayApp::IsConsoleExecutable(const AppItem& item) const
+	{
+		if (!EndsWithIgnoreCase(item.target, L".exe"))
+		{
+			return false; // scripts and shortcuts open as they always do
+		}
+		if (IsSameRelative(item.target, item.entry->target))
+		{
+			return item.entry->console;
+		}
+		if (rootIsRemote_)
+		{
+			return false;
+		}
+		const std::optional<fs::path> path = ResolveTarget(item);
+		return path && InspectExe(*path, InspectDetail::Header).isConsole; // another executable chosen by the user
+	}
+
+	// Console programs open inside a console unless the user said otherwise for this app (one that
+	// opens a window of its own, such as Blender, would leave the console behind)
+	bool TrayApp::OpensInConsole(const AppItem& item) const
+	{
+		if (!EndsWithIgnoreCase(item.target, L".exe"))
+		{
+			return false;
+		}
+		if (item.console)
+		{
+			return *item.console;
+		}
+		return IsConsoleExecutable(item);
+	}
+
+	bool TrayApp::IsItemInConsole(size_t index) const
+	{
+		return index < items_.size() && OpensInConsole(items_[index]);
+	}
+
+	bool TrayApp::HasConsoleChoice(size_t index) const
+	{
+		return index < items_.size() && (items_[index].console.has_value() || IsConsoleExecutable(items_[index]));
+	}
+
+	void TrayApp::SetItemInConsole(size_t index, bool inConsole)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const std::wstring id = items_[index].entry->id;
+		// Stored only when it differs from what the executable is
+		const bool isConsole = IsConsoleExecutable(items_[index]);
+		if (!CanChangeSettings())
+		{
+			return;
+		}
+		SetConsoleChoice(settings_, id, inConsole == isConsole ? std::nullopt : std::optional<bool>(inConsole));
+		SaveSettings();
+		RebuildItems();
+		launcher_.RefreshItems();
+	}
+
+	LaunchResult TrayApp::StartInConsole(
+		const fs::path& folder, const std::optional<fs::path>& program, std::wstring_view arguments, bool asAdmin)
+	{
+		const ConsoleShell shell = ParseConsoleShell(settings_.shell);
+		const ConsoleCommand command = BuildConsoleCommand(shell, FindShellProgram(shell), folder, program, arguments);
+		return LaunchProgram(command.program, command.parameters, asAdmin, folder);
+	}
+
+	std::optional<fs::path> TrayApp::GetItemFolder(const AppItem& item) const
+	{
+		const std::optional<fs::path> path = ResolveTarget(item);
+		if (!path)
+		{
+			return std::nullopt;
+		}
+		return item.target.empty() ? *path : path->parent_path(); // a suite is its folder
+	}
+
+	void TrayApp::LaunchItem(size_t index, bool asAdmin, bool newCopy)
 	{
 		if (index >= items_.size())
 		{
 			return;
 		}
 		const AppItem& item = items_[index];
+		if (!asAdmin && !newCopy && ActivateItemWindow(item))
+		{
+			RecordItemUse(index); // reached through AppTray all the same
+			launcher_.RequestClose();
+			return;
+		}
 		const LaunchResult result = StartItem(item, asAdmin);
 		if (result.started)
 		{
-			// Recent list and search ranking. The item is updated in place: a menu may hold the items.
-			const std::wstring now = FormatUtcNow();
-			RecordLaunch(usage_, item.entry->id, now);
-			items_[index].launchCount += 1;
-			items_[index].lastLaunched = now;
-			SaveUsage();
+			RecordItemUse(index);
 			launcher_.RequestClose(); // called from list-view notifications: never destroy it now
 		}
 		else if (!result.cancelled)
 		{
 			ReportError(text::LaunchFailed, std::format(L"{}: {}", item.name, DescribeLaunchError(result)));
 		}
+	}
+
+	// Recent list and search ranking. The item is updated in place: a menu may hold the items.
+	void TrayApp::RecordItemUse(size_t index)
+	{
+		const std::wstring now = FormatUtcNow();
+		RecordLaunch(usage_, items_[index].entry->id, now);
+		items_[index].launchCount += 1;
+		items_[index].lastLaunched = now;
+		SaveUsage();
+	}
+
+	void TrayApp::CloseItemWindows(size_t index)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const AppItem& item = items_[index];
+		const std::vector<HWND> windows = FindItemWindows(item);
+		if (windows.empty())
+		{
+			ReportInfo(item.name, text::Format(text::NoWindowToClose, item.name));
+			return;
+		}
+		bool blocked = false;
+		for (HWND window : windows)
+		{
+			blocked = !RequestWindowClose(window) || blocked;
+		}
+		WriteLog(std::format(L"asked {} to close ({} windows)", item.name, windows.size()));
+		if (blocked)
+		{
+			ReportError(item.name, text::Format(text::CloseBlocked, item.name));
+			return;
+		}
+		launcher_.RequestClose(); // the app may ask to save: let it come to the front
+	}
+
+	void TrayApp::OpenItemConsole(size_t index)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const std::optional<fs::path> folder = GetItemFolder(items_[index]);
+		if (!folder)
+		{
+			return;
+		}
+		const LaunchResult result = StartInConsole(*folder, std::nullopt, {}, false);
+		if (result.started)
+		{
+			WriteLog(L"console in " + folder->wstring());
+			launcher_.RequestClose();
+		}
+		else if (!result.cancelled)
+		{
+			ReportError(text::LaunchFailed, DescribeLaunchError(result));
+		}
+	}
+
+	bool TrayApp::IsItemFolderOnPath(size_t index) const
+	{
+		if (index >= items_.size())
+		{
+			return false;
+		}
+		const std::optional<fs::path> folder = GetItemFolder(items_[index]);
+		std::wstring error;
+		const std::optional<UserPath> path = folder ? ReadUserPath(error) : std::nullopt;
+		return path && ContainsPathEntry(path->list, folder->wstring());
+	}
+
+	// The user's PATH, not user.json: the registry is where Windows reads it, and the menu's check
+	// mark shows what is really there (also an entry added by hand)
+	void TrayApp::SetItemFolderOnPath(size_t index, bool onPath)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const AppItem& item = items_[index];
+		const std::optional<fs::path> folder = GetItemFolder(item);
+		if (!folder)
+		{
+			return;
+		}
+		std::wstring error;
+		std::optional<UserPath> path = ReadUserPath(error);
+		if (path)
+		{
+			const std::wstring list =
+				onPath ? AddPathEntry(path->list, folder->wstring()) : RemovePathEntry(path->list, folder->wstring());
+			if (list == path->list)
+			{
+				return;
+			}
+			path->list = list;
+			if (WriteUserPath(*path, error))
+			{
+				WriteLog(std::format(L"PATH: {} {}", onPath ? L"added" : L"removed", folder->wstring()));
+				AnnouncePathChange();
+				ReportInfo(text::PathTitle, text::Format(onPath ? text::PathAdded : text::PathRemoved, item.name));
+				return;
+			}
+		}
+		ReportError(text::PathFailed, error);
+	}
+
+	void TrayApp::EditItemKeywords(size_t index, HWND owner)
+	{
+		if (index >= items_.size())
+		{
+			return;
+		}
+		const std::wstring id = items_[index].entry->id;
+		const std::wstring label = text::Format(text::KeywordsLabel, items_[index].name);
+		const AppOverride* current = settings_.FindOverride(id);
+		const std::wstring initial = current != nullptr ? current->keywords.value_or(L"") : std::wstring{};
+		promptOpen_ = true;
+		const std::optional<std::wstring> keywords = ShowTextPrompt(instance_, owner, text::KeywordsTitle, label, initial);
+		promptOpen_ = false;
+		if (!keywords || exiting_ || Trim(*keywords) == initial || !CanChangeSettings())
+		{
+			return;
+		}
+		SetKeywords(settings_, id, *keywords);
+		SaveSettings();
+		RebuildItems();
+		launcher_.RefreshItems();
 	}
 
 	void TrayApp::OpenItemFolder(size_t index)
@@ -1017,16 +1365,9 @@ namespace apptray
 	{
 		ReloadSettingsIfChanged();
 		const MenuScope scope = EnterMenu(); // items stay put through the dialog
-		const std::vector<std::wstring> running = GetRunningImagePaths();
+		const std::vector<RunningProcess> running = GetRunningProcesses();
 		const AutostartPlan plan = PlanAutostart(
-			items_,
-			[&](const AppItem& item)
-			{
-				// A folder app counts as running when anything from its folder runs (launchers)
-				const bool isFolder = item.entry->kind == AppKind::Folder || item.entry->kind == AppKind::PortableApps;
-				const std::optional<fs::path> path = ResolvePath(isFolder ? item.entry->id : item.target);
-				return path && IsAppRunning(running, *path, isFolder);
-			});
+			items_, [&](const AppItem& item) { return !FindItemProcesses(item, running).empty(); });
 		WriteLog(std::format(L"logon: {} to open, {} to ask", plan.open.size(), plan.ask.size()));
 
 		const auto start = [&](size_t index)
@@ -1339,6 +1680,8 @@ namespace apptray
 
 	void TrayApp::OnLauncherClosed()
 	{
+		runningIds_.clear();
+		runningIds_.shrink_to_fit();
 		// The window, its image list and its icon thread are gone: return their memory
 		ReleaseFreeMemory();
 	}
@@ -1363,6 +1706,7 @@ namespace apptray
 		ReloadSettingsIfChanged();
 		RegisterLauncherHotkey(false); // retries a hotkey another program held
 		CheckForUpdates(); // at most once a day
+		RefreshRunningApps();
 		launcher_.Show(ChooseLauncherAnchor(trayIcon_.GetRect()));
 	}
 
@@ -1451,6 +1795,7 @@ namespace apptray
 		RegisterLauncherHotkey(false); // retries a hotkey another program held
 		CheckForUpdates(); // at most once a day
 		const MenuScope menuScope = EnterMenu(); // items stay put until the command has run
+		RefreshRunningApps();
 		categoryMenus_.clear();
 		HMENU menu = CreatePopupMenu();
 		if (newRelease_)
@@ -1496,6 +1841,26 @@ namespace apptray
 		}
 		if (recentShown > 0)
 		{
+			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+		}
+
+		// Apps running now: a click brings their window to the front, as for any running app
+		AppFilter visible;
+		HMENU runningMenu = nullptr;
+		for (const size_t index : FilterAppItems(items_, visible, settings_.favorites))
+		{
+			if (items_[index].running)
+			{
+				if (runningMenu == nullptr)
+				{
+					runningMenu = CreatePopupMenu();
+				}
+				AppendAppMenuItem(runningMenu, index, AppCommandBase + static_cast<UINT>(index));
+			}
+		}
+		if (runningMenu != nullptr)
+		{
+			AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(runningMenu), text::RunningApps);
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		}
 
@@ -1685,6 +2050,10 @@ namespace apptray
 		switch (message)
 		{
 		case WM_APP_TRAY:
+			if (promptOpen_)
+			{
+				return 0; // the keywords dialog is modal over the launcher
+			}
 			if (aboutWindow_ != nullptr)
 			{
 				// The About dialog is modal: the icon brings it to the front instead
@@ -1750,6 +2119,10 @@ namespace apptray
 			}
 			return 0;
 		case WM_APP_SHOW:
+			if (promptOpen_)
+			{
+				return 0;
+			}
 			if (aboutWindow_ != nullptr)
 			{
 				SetForegroundWindow(aboutWindow_);
@@ -1773,6 +2146,10 @@ namespace apptray
 			{
 				Theme::ApplyMenuMode(Theme::IsSystemDark());
 				launcher_.RefreshTheme();
+			}
+			else if (lParam != 0 && wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"Environment") == 0)
+			{
+				RefreshProcessPath(); // PATH changed (by AppTray or anyone): apps started from here get it
 			}
 			break;
 		case WM_DESTROY:

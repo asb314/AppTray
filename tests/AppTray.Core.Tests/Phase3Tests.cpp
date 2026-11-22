@@ -1,9 +1,8 @@
-// Logon apps, elevated task names, running-process detection and the update check
+// Logon apps, elevated task names and the update check (running processes: Phase5Tests)
 
 #include "AppList.h"
 #include "CommandLine.h"
 #include "ElevatedTask.h"
-#include "ProcessFinder.h"
 #include "UpdateCheck.h"
 
 #include <windows.h>
@@ -60,20 +59,6 @@ TEST(AutostartPlan, Should_OpenAlwaysAppsAndAskTheRest_SkippingRunningOnes)
 	EXPECT_EQ(items[plan.open[0]].entry->id, L"A/always");
 	ASSERT_EQ(plan.ask.size(), 1u);
 	EXPECT_EQ(items[plan.ask[0]].entry->id, L"A/ask");
-}
-
-TEST(ProcessFinder, Should_FindThisTestProgramByFileAndByFolder)
-{
-	wchar_t self[MAX_PATH]{};
-	GetModuleFileNameW(nullptr, self, MAX_PATH);
-	const std::filesystem::path exe(self);
-	const std::vector<std::wstring> running = GetRunningImagePaths();
-
-	EXPECT_TRUE(IsAppRunning(running, exe, false));
-	EXPECT_TRUE(IsAppRunning(running, exe.parent_path(), true));
-	EXPECT_FALSE(IsAppRunning(running, exe.parent_path() / L"not-running.exe", false));
-	// "C:\Apps\Foo" must not match a process in "C:\Apps\FooBar"
-	EXPECT_FALSE(IsAppRunning(running, exe.parent_path().wstring() + L"Suffix", true));
 }
 
 TEST(ElevatedTask, Should_MakeReadableTaskNamesWithoutForbiddenCharacters)

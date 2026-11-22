@@ -20,9 +20,10 @@ tools/New-AppIcon.ps1        draws res/AppTray.ico (PNG frames 16-256 px)
 | File | Responsibility |
 |---|---|
 | `main.cpp` | Entry point: `--scan` (console output), `--check-update`, `--register-task`/`--unregister-task` (elevated copy), `--create-shortcut`, single instance per exe folder (mutex; a second start forwards `--show`/`--exit`), COM and common controls |
-| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps, shortcuts, logon apps, Start with Windows, daily update check (and on demand), "Acerca de" task dialog |
+| `TrayApp` | The running program: catalog, settings (reloaded when `user.json` changes; `user.json.bak` before each change), usage (`usage.json`), tray menu (favorites, recent apps, running apps, category submenus filled on `WM_INITMENUPOPUP`), global hotkey (`RegisterHotKey`), background refresh, settings moved to renamed app folders, actions on apps (switch to a running one, close its windows, console programs in a console, folder on the user PATH, keywords), shortcuts, logon apps, Start with Windows, daily update check (and on demand), "Acerca de" task dialog |
+| `TextPrompt` | Small modal one-line text dialog (OK / Cancel), owned by the launcher: the keywords of an app |
 | `StartupPrompt` | The logon dialog: "ask" apps as a check-box list view with a countdown (Abrir / Ninguna) |
-| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), status line with version, a painted menu button (and F10) that opens the tray menu owned by the launcher (it forwards `WM_INITMENUPOPUP`); created on show, destroyed on deactivation; keyboard shortcuts in `PreTranslateMessage` |
+| `LauncherWindow` | The flyout: folder search over the category tree (pruned with `FilterCategoryTree`; Favorites, Recent, All, New, categories...), app search over an owner-data list view (scoped to the chosen folder), "running" tag, status line with version, a painted menu button (and F10) that opens the tray menu owned by the launcher (it forwards `WM_INITMENUPOPUP`); created on show, destroyed on deactivation (not while its own keywords dialog is up); keyboard shortcuts in `PreTranslateMessage` |
 | `TrayIcon` | `Shell_NotifyIcon` v4 with a GUID (falls back to a plain id if refused): add (again after `TaskbarCreated`), tip, notifications, icon rectangle |
 | `IconLoader` | App icons (`SHDefExtractIcon`, shell icon for scripts/shortcuts/folders), menu bitmaps through WIC, background `IconWorker` |
 | `Theme` | Light/dark from `AppsUseLightTheme` (or `APPTRAY_THEME`), palette, DWM corners/border, dark menus and controls |
@@ -56,8 +57,7 @@ exits with 0.
 Logon (`--startup`, from the HKCU Run value): one-shot timers run `RunLogonApps` after
 `startupDelaySeconds` and the first update check after 60 s. `PlanAutostart` lists the
 "always" apps to open and the "ask" apps for `StartupPrompt`, skipping hidden, missing and
-running ones (`ProcessFinder`: every process image path, matched by file, or by folder prefix
-for folder and PortableApps apps). An app that needs administrator opens through its elevated
+running ones (`ProcessFinder` with `GetProcessScope`, as for the launcher's "running" apps). An app that needs administrator opens through its elevated
 task or not at all. The logon run holds a `MenuScope`, so a refresh cannot swap the items
 under the dialog.
 
@@ -68,6 +68,28 @@ and gets `renamedFrom`; the old one is not kept as missing. The scan never write
 so the tray does the move after loading the catalog (`MoveRenamedAppSettings`: favorites in
 place, override and hand-written keys, target rebased or dropped, elevated task dropped) and
 moves the usage. Until user.json can be written, later scans keep `renamedFrom`.
+
+Running apps: when the launcher or the tray menu opens, one process snapshot
+(`GetRunningProcesses`) sets `AppItem::running` (`GetProcessScope`: folder and PortableApps
+apps by any process inside their folder, others by their executable, suites never); the ids are
+kept so a rebuild of the items keeps the flags. Opening an app takes a fresh snapshot: if one of
+its processes has a main window (`FindMainWindows`: visible, unowned, titled, no tool window,
+front-most first; in a folder app the chosen executable's windows first, the folder's other
+programs only when it has none) AppTray activates it instead of starting it, unless as
+administrator or as "another copy", and records it as a use. "Close" posts `WM_CLOSE` to those
+windows (blocked by UIPI for elevated ones).
+
+Consoles: a target whose executable is a console program (`AppEntry::console` from the scan, or
+`ExeInspector` for a target the user chose, skipped on a network root), unless the app's
+`console` override says otherwise, starts through `BuildConsoleCommand`: pwsh / powershell
+`-NoExit -Command` (the app's arguments after `--%`, untouched) or `cmd /s /k` (operators in
+the arguments escaped; `pushd`, which also enters UNC folders), with the folder prepended to
+`PATH` and made current inside the command line itself, so it also works through `runas`. Not
+at logon, and not for a missing executable (the shell would hide the "not found"). "Its folder on the PATH" edits `HKCU\Environment\Path` (`UserPath`: entries compared
+expanded, unquoted, without trailing backslash, case-insensitive; the value type is kept),
+refreshes the tray's own `PATH` from the registry (`CreateEnvironmentBlock`) and broadcasts
+`WM_SETTINGCHANGE "Environment"` on a detached thread. The tray also refreshes its `PATH` when
+anyone else broadcasts that change.
 
 Hotkey: `RegisterHotKey` on the tray window (`MOD_NOREPEAT`); `WM_HOTKEY` toggles the launcher
 (ignored while a menu or the logon dialog is open). The input that fires it lets the launcher
@@ -88,17 +110,20 @@ a `std::stop_token` (used by callers that scan in-process).
 | `ExeInspector` | Reads PE header, version resource (names, product version) and manifest without running the file |
 | `NameTokens` | Tokenizes file/folder names and scores how well they match; tidies versions and finds one in a name |
 | `Catalog` | `catalog.json` load/save |
-| `UserSettings` | `user.json` load/save (keeps unknown keys); `SerializeUserSettings` also feeds `user.json.bak` |
+| `UserSettings` | `user.json` load/save (keeps unknown keys; per-app `keywords` and `console` choice, the console `shell`); `SerializeUserSettings` also feeds `user.json.bak` |
 | `CatalogMerger` | Fresh scan + previous catalog + user data → new catalog (renamed version folders recognized); `MoveRenamedAppSettings` moves the user's data to them |
 | `UsageStats` | `usage.json`: launch count and last launch per app; record, move, load/save |
 | `Hotkey` | Parses and formats the global hotkey (`"Ctrl+Alt+Space"`, Spanish key names too) |
 | `Shortcut` | `.lnk` files with `IShellLink` (desktop, Start menu\Programs\AppTray), file names without forbidden characters |
 | `CatalogRefresher` | Scan + merge + save in one call, thread-safe (used by `--scan` and the tray's background refresh) |
-| `AppList` | Catalog + `user.json` + usage → items the UI shows (overrides, favorites, hidden, new, autostart, launches); filters (Recent too), accent-insensitive search that also matches initials, ranking by launches while searching, category tree, logon plan |
+| `AppList` | Catalog + `user.json` + usage → items the UI shows (overrides, favorites, hidden, new, autostart, launches, keywords, running flag); filters (Recent too), accent-insensitive search that also matches initials and keywords, ranking by launches while searching, category tree, logon plan, where to look for an app among processes (`GetProcessScope`) |
 | `AppLauncher` | `ShellExecuteEx` launch (normal or `runas`), open folder/document, reveal in Explorer |
 | `ElevatedTask` | Task Scheduler (COM) tasks in `\AppTray` (name = readable id + FNV-1a hash): run elevated on demand with the user's interactive token, no trigger; create (for the user passed with `--task-user`), delete, run only if its action still matches the app's exe and arguments; delete orphans (program inside the root and gone) on every create/delete |
 | `LogonRegistration` | The HKCU `Run` value `AppTray` (`"exe" --startup`): read, set, delete, repair when the exe moved |
-| `ProcessFinder` | Image paths of running processes (`QueryFullProcessImageName`, works for elevated ones) and the "is this app running" test |
+| `ProcessFinder` | Running processes with their image paths (`QueryFullProcessImageName`, works for elevated ones) and the processes of an app (by file, or by folder prefix) |
+| `AppWindows` | Main windows of some processes (as the taskbar shows them), activate one, ask one to close |
+| `ConsoleCommand` | The console shell (pwsh / Windows PowerShell / cmd) and its command line: open in a folder with it first in `PATH`, optionally run a program, stay open |
+| `UserPath` | The user's `PATH` in `HKCU\Environment`: find, add, remove and rebase entries; read/write keeping the value type; announce the change; refresh the process's own `PATH` |
 | `UpdateCheck` | Latest GitHub release over WinHTTP, version comparison, `update.json` |
 | `Version.h` | Version number and GitHub repository (also used by the `.rc` and `New-Release.ps1`) |
 | `PathResolver` | Absolute ↔ root-relative paths (`/` separators); root resolution |

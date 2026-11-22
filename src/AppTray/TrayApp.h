@@ -6,6 +6,7 @@
 #include "Hotkey.h"
 #include "LauncherWindow.h"
 #include "PathResolver.h"
+#include "ProcessFinder.h"
 #include "Shortcut.h"
 #include "TrayIcon.h"
 #include "UpdateCheck.h"
@@ -77,7 +78,16 @@ namespace apptray
 		void ShowTrayMenu(POINT point, HWND owner = nullptr, const RECT* exclude = nullptr);
 		void FillCategoryMenu(HMENU menu);
 
-		void LaunchItem(size_t index, bool asAdmin);
+		// A running app's window comes to the front instead, unless asAdmin or newCopy
+		void LaunchItem(size_t index, bool asAdmin, bool newCopy = false);
+		void CloseItemWindows(size_t index);
+		void OpenItemConsole(size_t index);
+		bool IsItemFolderOnPath(size_t index) const;
+		void SetItemFolderOnPath(size_t index, bool onPath);
+		void EditItemKeywords(size_t index, HWND owner);
+		bool IsItemInConsole(size_t index) const;   // it opens inside a console
+		bool HasConsoleChoice(size_t index) const;  // the launcher offers "Open in a console"
+		void SetItemInConsole(size_t index, bool inConsole);
 		void OpenItemFolder(size_t index);
 		void OpenItemReadme(size_t index);
 		void ToggleItemFavorite(size_t index);
@@ -137,6 +147,19 @@ namespace apptray
 		void ReportError(std::wstring_view title, std::wstring_view text);
 		bool StartChildProcess(const std::wstring& arguments, UINT doneMessage, std::jthread& waiter);
 		LaunchResult StartItem(const AppItem& item, bool asAdmin, bool atLogon = false);
+		bool IsConsoleExecutable(const AppItem& item) const;
+		bool OpensInConsole(const AppItem& item) const;
+		void RecordItemUse(size_t index);
+		std::vector<HWND> FindItemWindows(const AppItem& item) const;
+		LaunchResult StartInConsole(
+			const std::filesystem::path& folder, const std::optional<std::filesystem::path>& program, std::wstring_view arguments,
+			bool asAdmin);
+		std::optional<std::filesystem::path> GetItemFolder(const AppItem& item) const;
+		std::vector<unsigned long> FindItemProcesses(const AppItem& item, const std::vector<RunningProcess>& processes) const;
+		bool ActivateItemWindow(const AppItem& item);
+		void RefreshRunningApps();
+		void MoveUserPathEntries(const std::vector<std::pair<std::filesystem::path, std::filesystem::path>>& folders);
+		void AnnouncePathChange();
 		void RunLogonApps();
 		void ToggleStartWithWindows();
 		void CheckForUpdates();
@@ -176,6 +199,7 @@ namespace apptray
 		bool settingsBroken_ = false; // user.json did not parse: never overwrite it
 		UsageStats usage_;
 		std::vector<AppItem> items_;
+		std::vector<std::wstring> runningIds_; // apps running at the last snapshot (launcher or tray menu)
 
 		std::jthread scanThread_;
 		std::atomic<bool> scanning_ = false;
@@ -205,6 +229,7 @@ namespace apptray
 
 		std::optional<Notice> startupNotice_; // raised before the tray icon exists, shown once it does
 		bool aboutOpen_ = false;
+		bool promptOpen_ = false;    // the keywords dialog
 		HWND aboutWindow_ = nullptr; // the About dialog while it is open
 
 		// Tray menu state, valid while the menu is open

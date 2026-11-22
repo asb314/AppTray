@@ -57,6 +57,7 @@
 		<ClCompile Include="PathResolverTests.cpp" />
 		<ClCompile Include="Phase3Tests.cpp" />
 		<ClCompile Include="Phase4Tests.cpp" />
+		<ClCompile Include="Phase5Tests.cpp" />
 		<ClCompile Include="StringsTests.cpp" />
 		<ClCompile Include="TestMain.cpp" />
 	</ItemGroup>
