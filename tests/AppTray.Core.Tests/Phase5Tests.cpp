@@ -5,6 +5,7 @@
 #include "AppWindows.h"
 #include "Catalog.h"
 #include "ConsoleCommand.h"
+#include "LogonRegistration.h"
 #include "ProcessFinder.h"
 #include "UserPath.h"
 #include "UserSettings.h"
@@ -258,6 +259,98 @@ TEST(UserPath, Should_ReadAndWriteTheRegistryValue_KeepingItsType)
 	path.expandable = false;
 	ASSERT_TRUE(WriteUserPath(path, error, TestRegistryKey::Key)) << error;
 	EXPECT_FALSE(ReadUserPath(error, TestRegistryKey::Key)->expandable);
+}
+
+TEST(LogonRegistration, Should_GiveEachCopyItsOwnRunValue_AndLeaveTheOthersAlone)
+{
+	TestRegistryKey cleanup;
+	constexpr wchar_t Key[] = L"Software\\AppTray.Tests\\Run";
+	TestTree tree;
+	const std::filesystem::path apps = tree.Add(L"Applications/AppTray/AppTray.exe");
+	const std::filesystem::path games = tree.Add(L"Juegos/AppTray/AppTray.exe");
+	const std::wstring other = L"\"C:\\Other\\other.exe\" --tray";
+	ASSERT_EQ(RegSetKeyValueW(HKEY_CURRENT_USER, Key, L"Other", REG_SZ, other.c_str(),
+				  static_cast<DWORD>((other.size() + 1) * sizeof(wchar_t))),
+		ERROR_SUCCESS);
+	const auto readValue = [&](const wchar_t* name)
+	{
+		wchar_t buffer[1024]{};
+		DWORD size = sizeof(buffer);
+		return RegGetValueW(HKEY_CURRENT_USER, Key, name, RRF_RT_REG_SZ, nullptr, buffer, &size) == ERROR_SUCCESS
+			? std::optional<std::wstring>(buffer)
+			: std::nullopt;
+	};
+
+	std::wstring error;
+	ASSERT_TRUE(SetRegisteredAtLogon(true, apps, L"Applications", error, Key)) << error;
+	ASSERT_TRUE(SetRegisteredAtLogon(true, games, L"Juegos", error, Key)) << error;
+	EXPECT_EQ(readValue(L"AppTray"), L"\"" + apps.wstring() + L"\" --startup"); // the first copy
+	EXPECT_EQ(readValue(L"AppTray (Juegos)"), L"\"" + games.wstring() + L"\" --startup");
+	EXPECT_TRUE(IsRegisteredAtLogon(apps, Key));
+	EXPECT_TRUE(IsRegisteredAtLogon(games, Key));
+
+	// Registering again changes nothing; turning one off keeps the other
+	ASSERT_TRUE(SetRegisteredAtLogon(true, games, L"Juegos", error, Key)) << error;
+	ASSERT_TRUE(SetRegisteredAtLogon(false, games, L"Juegos", error, Key)) << error;
+	EXPECT_FALSE(readValue(L"AppTray (Juegos)").has_value());
+	EXPECT_FALSE(IsRegisteredAtLogon(games, Key));
+	EXPECT_TRUE(IsRegisteredAtLogon(apps, Key));
+	EXPECT_EQ(readValue(L"Other"), other);
+}
+
+TEST(LogonRegistration, Should_RepairTheValueOfACopyThatMoved_AndNoOtherCopysValue)
+{
+	TestRegistryKey cleanup;
+	constexpr wchar_t Key[] = L"Software\\AppTray.Tests\\Run";
+	TestTree tree;
+	const std::filesystem::path apps = tree.Add(L"Applications/AppTray/AppTray.exe");
+	// Both moved at once (a new drive letter): each finds its own value by its last folders
+	const std::filesystem::path oldGames = tree.Root() / L"old/Juegos/AppTray/AppTray.exe"; // not on disk
+	const std::filesystem::path oldTools = tree.Root() / L"old/Tools/AppTray/AppTray.exe";  // not on disk
+	const std::filesystem::path games = tree.Add(L"new/Juegos/AppTray/AppTray.exe");
+	const std::filesystem::path tools = tree.Add(L"new/Tools/AppTray/AppTray.exe");
+	std::wstring error;
+	ASSERT_TRUE(SetRegisteredAtLogon(true, apps, L"Applications", error, Key)) << error;
+	ASSERT_TRUE(SetRegisteredAtLogon(true, oldGames, L"Juegos", error, Key)) << error;
+	ASSERT_TRUE(SetRegisteredAtLogon(true, oldTools, L"Tools", error, Key)) << error;
+
+	RepairLogonRegistration(games, Key);
+	RepairLogonRegistration(tools, Key);
+	EXPECT_TRUE(IsRegisteredAtLogon(games, Key));
+	EXPECT_TRUE(IsRegisteredAtLogon(tools, Key));
+	EXPECT_FALSE(IsRegisteredAtLogon(oldGames, Key));
+	EXPECT_TRUE(IsRegisteredAtLogon(apps, Key)); // a value whose exe is there is never taken
+
+	// A copy elsewhere never takes a missing copy's value (a USB drive unplugged)...
+	const std::filesystem::path usb = tree.Root() / L"usb/Retro/AppTray/AppTray.exe"; // not on disk
+	ASSERT_TRUE(SetRegisteredAtLogon(true, usb, L"Retro", error, Key)) << error;
+	const std::filesystem::path other = tree.Add(L"Otra/AppTray/AppTray.exe");
+	RepairLogonRegistration(other, Key);
+	EXPECT_FALSE(IsRegisteredAtLogon(other, Key));
+	// ...nor its name when it registers
+	ASSERT_TRUE(SetRegisteredAtLogon(true, other, L"Retro", error, Key)) << error;
+	EXPECT_TRUE(IsRegisteredAtLogon(usb, Key));
+	EXPECT_TRUE(IsRegisteredAtLogon(other, Key));
+}
+
+TEST(LogonRegistration, Should_ExpandAnExpandableValue_AndIgnoreAnEmptyOne)
+{
+	TestRegistryKey cleanup;
+	constexpr wchar_t Key[] = L"Software\\AppTray.Tests\\Run";
+	TestTree tree;
+	const std::filesystem::path exe = tree.Add(L"Applications/AppTray/AppTray.exe");
+	// A variable of this process: ExpandEnvironmentStrings reads this process's environment
+	SetEnvironmentVariableW(L"APPTRAY_TEST_ROOT", tree.Root().c_str());
+	const std::wstring command = L"\"%APPTRAY_TEST_ROOT%\\Applications\\AppTray\\AppTray.exe\" --startup";
+	ASSERT_EQ(RegSetKeyValueW(HKEY_CURRENT_USER, Key, L"AppTray", REG_EXPAND_SZ, command.c_str(),
+				  static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t))),
+		ERROR_SUCCESS);
+	EXPECT_TRUE(IsRegisteredAtLogon(exe, Key));
+
+	const wchar_t empty[] = L"";
+	ASSERT_EQ(RegSetKeyValueW(HKEY_CURRENT_USER, Key, L"AppTray", REG_SZ, empty, sizeof(empty)), ERROR_SUCCESS);
+	EXPECT_FALSE(IsRegisteredAtLogon(exe, Key)); // not "this process" by accident
+	SetEnvironmentVariableW(L"APPTRAY_TEST_ROOT", nullptr);
 }
 
 TEST(AppList, Should_FindAppsByTheirKeywords_AndRankAKeywordStartLikeAName)

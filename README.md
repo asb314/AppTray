@@ -128,8 +128,11 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 ### At logon
 
 "Start with Windows" (tray menu) adds `"…\AppTray.exe" --startup` to
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; no administrator needed. If the folder
-moves, the next start of AppTray fixes the value. With `--startup`, AppTray waits
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (value `AppTray`; another copy gets its own,
+see below); no administrator needed. If the folder moves, the next start of AppTray fixes the
+value: the one whose exe is missing and has the same last folders
+(`Juegos\AppTray\AppTray.exe`), so a new drive letter is fine and another copy's value is never
+taken. With `--startup`, AppTray waits
 `startupDelaySeconds` (30) and then, for each app (right click › "At logon"):
 - **Always open** — opened, unless it is already running.
 - **Ask** — listed in a small dialog with a checkbox each and a countdown
@@ -143,6 +146,23 @@ PortableApps launchers, any executable inside the app's folder), so FirefoxPorta
 started twice when firefox.exe runs. A copy of the same program installed elsewhere does not
 count. Apps that need administrator are skipped at logon (with a notification) unless they
 have "Open without UAC".
+
+### Another tree (games, a USB drive...)
+
+One AppTray lists one tree. For another one, put a second copy of `AppTray.exe` in its own folder
+inside that tree (`D:\Juegos\AppTray\AppTray.exe`, or `tools\Deploy-AppTray.ps1 -Destination
+D:\Juegos\AppTray -Start`); it keeps its own `data\` (catalog, favorites, Recent), its own icon and
+its own settings. Each copy is independent:
+- Give it another hotkey in its `user.json` (`"hotkey": "Ctrl+Alt+Shift+Space"`): the default
+	one belongs to the first copy, and the second says "used by another program" until you do.
+- "Start with Windows" works per copy: the first registered copy uses the Run value `AppTray`,
+	the others `AppTray (<folder of their tree>)`.
+- The icon's tooltip names the tree ("AppTray · Juegos · 120 apps"), and About shows its path.
+- Scan options (`"scan"` › `"ignore"`, `"skipNames"`) are per copy too: for games, skipping
+	folders such as `_CommonRedist` keeps redistributables out.
+
+A copy outside the tree can point at it with `"root"` in its `user.json`, but then the first
+copy's scan would list that copy's folder as an app: inside the tree it skips itself.
 
 ### Open without UAC
 

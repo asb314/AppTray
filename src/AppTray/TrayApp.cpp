@@ -545,9 +545,17 @@ namespace apptray
 		return description;
 	}
 
+	// The tree's folder name ("Applications", "Juegos"): tells two AppTray copies apart
+	std::wstring TrayApp::DescribeRoot() const
+	{
+		const std::wstring name = root_.filename().wstring();
+		return name.empty() ? root_.wstring() : name; // a drive root: "D:\"
+	}
+
 	void TrayApp::UpdateTip()
 	{
-		std::wstring tip = std::format(L"{} · {} apps", text::AppName, CountAppItems(items_, AppFilterKind::All));
+		std::wstring tip =
+			std::format(L"{} · {} · {} apps", text::AppName, DescribeRoot(), CountAppItems(items_, AppFilterKind::All));
 		if (scanning_)
 		{
 			tip += L" · ";
@@ -1430,8 +1438,8 @@ namespace apptray
 	void TrayApp::ToggleStartWithWindows()
 	{
 		std::wstring error;
-		// Unchecked while another copy is registered: checking it registers this one instead
-		if (!SetRegisteredAtLogon(!IsRegisteredAtLogon(exePath_), exePath_, error))
+		// Each copy has its own Run value: another copy (another tree) keeps starting too
+		if (!SetRegisteredAtLogon(!IsRegisteredAtLogon(exePath_), exePath_, DescribeRoot(), error))
 		{
 			ReportError(text::StartWithWindows, error);
 		}

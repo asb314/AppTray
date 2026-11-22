@@ -173,6 +173,7 @@ namespace apptray
 			HWND dialog, UINT notification, WPARAM wParam, LPARAM lParam, LONG_PTR data);
 		void RegisterLauncherHotkey(bool warn);
 		std::wstring DescribeHotkey(const Hotkey& hotkey) const;
+		std::wstring DescribeRoot() const;
 		bool ApplyLanguage();
 		void ReportInfo(std::wstring_view title, std::wstring_view text);
 		void ShowNotice(const Notice& notice);
