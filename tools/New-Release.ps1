@@ -24,7 +24,9 @@ Write-Host "AppTray $version ($repository)"
 if ($Publish) {
 	if (git -C $repo status --porcelain) { throw 'The working tree has changes: commit them first' }
 	git -C $repo fetch --quiet origin
-	if ((git -C $repo rev-parse HEAD) -ne (git -C $repo rev-parse '@{u}')) { throw 'HEAD is not pushed: push first' }
+	$upstream = git -C $repo rev-parse '@{u}' 2>$null
+	if ($LASTEXITCODE -ne 0) { throw 'The branch has no upstream: push it with -u first' }
+	if ((git -C $repo rev-parse HEAD) -ne $upstream) { throw 'HEAD is not pushed: push first' }
 	if (git -C $repo tag --list $tag) { throw "Tag $tag already exists: bump Version.h" }
 }
 
@@ -66,7 +68,17 @@ $headers = @{ Authorization = "Bearer $token"; 'User-Agent' = 'AppTray-release';
 
 $previous = git -C $repo describe --tags --abbrev=0 2>$null
 $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
-$changes = (git -C $repo log $range --format='- %s' --no-merges) -join "`n"
+# Through a file written and read as UTF-8: PowerShell decodes a native program's output with the
+# console's code page (OEM in a console, ANSI without one), never UTF-8, and mangles accents
+$changesFile = Join-Path ([IO.Path]::GetTempPath()) "AppTray-changes-$PID.txt"
+try {
+	git -C $repo -c i18n.logOutputEncoding=UTF-8 log $range --format='- %s' --no-merges --output=$changesFile
+	if ($LASTEXITCODE -ne 0) { throw "git log $range failed" }
+	$changes = (Get-Content -LiteralPath $changesFile -Encoding utf8) -join "`n"
+}
+finally {
+	Remove-Item -LiteralPath $changesFile -ErrorAction SilentlyContinue
+}
 $body = @"
 Download **AppTray-$version-win-x64.zip**, unzip ``AppTray.exe`` into its own folder inside the tree of apps it should list, and start it. No installer, no runtime.
 
@@ -83,7 +95,8 @@ if ($LASTEXITCODE -ne 0) { git -C $repo tag -d $tag | Out-Null; throw "Cannot pu
 $release = $null
 try {
 	$release = Invoke-RestMethod "https://api.github.com/repos/$repository/releases" -Method Post -Headers $headers `
-		-ContentType 'application/json' -Body (@{ tag_name = $tag; name = "AppTray $version"; body = $body } | ConvertTo-Json)
+		-ContentType 'application/json; charset=utf-8' `
+		-Body ([Text.Encoding]::UTF8.GetBytes((@{ tag_name = $tag; name = "AppTray $version"; body = $body } | ConvertTo-Json)))
 	$uploadBase = $release.upload_url -replace '\{.*\}$', ''
 	foreach ($file in $zip, $hashFile) {
 		$name = Split-Path $file -Leaf
@@ -93,13 +106,20 @@ try {
 	}
 }
 catch {
-	# Leave nothing half-published, so the same command can simply run again
+	# Leave nothing half-published, so the same command can simply run again. If the release
+	# cannot be deleted, the tag stays too: a release without its tag would become a draft.
+	$releaseGone = $true
 	if ($release) {
 		try { Invoke-RestMethod "https://api.github.com/repos/$repository/releases/$($release.id)" -Method Delete -Headers $headers }
-		catch { Write-Warning "Delete the half-published release by hand: $($release.html_url)" }
+		catch {
+			$releaseGone = $false
+			Write-Warning "Delete the half-published release and the tag $tag by hand: $($release.html_url)"
+		}
 	}
-	git -C $repo push --delete origin $tag
-	git -C $repo tag -d $tag | Out-Null
+	if ($releaseGone) {
+		git -C $repo push --delete origin $tag
+		git -C $repo tag -d $tag | Out-Null
+	}
 	throw
 }
 Write-Host "Published $($release.html_url)"
