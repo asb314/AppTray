@@ -1872,9 +1872,39 @@ namespace apptray
 				AppendAppMenuItem(runningMenu, index, AppCommandBase + static_cast<UINT>(index));
 			}
 		}
+		// Apps opened or offered at logon: a submenu next to "Running", "always" ones, a separator,
+		// then "ask" ones (missing ones only in the launcher, marked "not found")
+		AppFilter autostart;
+		autostart.kind = AppFilterKind::Autostart;
+		HMENU autostartMenu = nullptr;
+		bool askSeparatorPending = false; // the previous item was an "always" one
+		for (const size_t index : FilterAppItems(items_, autostart, settings_.favorites))
+		{
+			if (items_[index].entry->missing)
+			{
+				continue;
+			}
+			if (autostartMenu == nullptr)
+			{
+				autostartMenu = CreatePopupMenu();
+			}
+			else if (items_[index].autostart == AutostartMode::Ask && askSeparatorPending)
+			{
+				AppendMenuW(autostartMenu, MF_SEPARATOR, 0, nullptr);
+			}
+			askSeparatorPending = items_[index].autostart == AutostartMode::Always;
+			AppendAppMenuItem(autostartMenu, index, AppCommandBase + static_cast<UINT>(index));
+		}
 		if (runningMenu != nullptr)
 		{
 			AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(runningMenu), text::RunningApps);
+		}
+		if (autostartMenu != nullptr)
+		{
+			AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(autostartMenu), text::Autostart);
+		}
+		if (runningMenu != nullptr || autostartMenu != nullptr)
+		{
 			AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
 		}
 

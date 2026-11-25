@@ -113,6 +113,7 @@ namespace apptray::text
 	inline constexpr Text Recent{L"Recientes", L"Recent"};
 	inline constexpr Text All{L"Todas", L"All"};
 	inline constexpr Text New{L"Nuevas", L"New"};
+	inline constexpr Text Autostart{L"Autoinicio", L"Autostart"};
 	inline constexpr Text InstallersAndCopies{L"Instaladores y copias", L"Installers and copies"};
 	inline constexpr Text Hidden{L"Ocultas", L"Hidden"};
 	inline constexpr Text RootCategory{L"(raíz)", L"(root)"};
@@ -120,6 +121,8 @@ namespace apptray::text
 	inline constexpr Text NotFound{L"no encontrada", L"not found"};
 	inline constexpr Text NewTag{L"nueva", L"new"};
 	inline constexpr Text RunningTag{L"abierta", L"running"};
+	inline constexpr Text AutostartAlwaysTag{L"al iniciar", L"at logon"};
+	inline constexpr Text AutostartAskTag{L"pregunta al iniciar", L"asks at logon"};
 	inline constexpr Text RunningHint{L"Abierta (Mayús+Intro abre otra copia)", L"Running (Shift+Enter opens another copy)"};
 	inline constexpr Text OpensInConsole{L"se abre en una consola", L"opens in a console"};
 	inline constexpr Text NoMatches{L"Nada coincide con la búsqueda", L"Nothing matches the search"};

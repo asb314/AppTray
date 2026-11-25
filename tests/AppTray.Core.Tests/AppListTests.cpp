@@ -214,3 +214,29 @@ TEST(UserSettings, Should_ToggleFavoritesAndDropEmptyOverrides)
 	SetTargetOverride(settings, L"A/a", std::nullopt);
 	EXPECT_FALSE(settings.apps.contains(L"A/a"));
 }
+
+TEST(AppList, Should_ListAutostartApps_AlwaysBeforeAsk_WithoutHiddenOnes)
+{
+	Catalog catalog = MakeCatalog();
+	UserSettings settings;
+	SetAutostart(settings, L"Media/Video/Cut", AutostartMode::Ask);
+	SetAutostart(settings, L"Utils/Old", AutostartMode::Always);
+	SetAutostart(settings, L"Utils/Setup", AutostartMode::Always); // an installer still counts
+	SetAutostart(settings, L"Media/Audio/Música", AutostartMode::Always);
+	SetHidden(settings, L"Media/Audio/Música", true); // hidden: never opened at logon
+	catalog.apps[2].missing = true;                    // missing: listed, so it can be turned off
+	catalog.apps.push_back(MakeEntry(L"Utils/Suite", L"Utils", L"Suite", catalog.baselineAt));
+	catalog.apps.back().target.clear();                // a suite opens a folder: never at logon
+	SetAutostart(settings, L"Utils/Suite", AutostartMode::Always);
+	const std::vector<AppItem> items = BuildAppItems(catalog, settings, L"2026-11-21T12:00:00Z");
+
+	AppFilter autostart;
+	autostart.kind = AppFilterKind::Autostart;
+	EXPECT_EQ(
+		NamesOf(items, FilterAppItems(items, autostart, {})),
+		(std::vector<std::wstring>{L"Old tool", L"Setup thing", L"Cutter"}));
+	EXPECT_EQ(CountAppItems(items, AppFilterKind::Autostart), 3u);
+
+	autostart.search = L"cut";
+	EXPECT_EQ(NamesOf(items, FilterAppItems(items, autostart, {})), (std::vector<std::wstring>{L"Cutter"}));
+}

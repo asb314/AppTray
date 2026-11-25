@@ -52,6 +52,7 @@ namespace apptray
 		Favorites,  // in the user's order
 		Recent,     // last opened first, at most RecentAppLimit
 		New,
+		Autostart,  // opened or offered at logon: "always" ones first, then "ask"
 		Category,   // a category and everything below it
 		Installers, // installers and backup copies
 		Hidden,     // hidden by the user
@@ -68,7 +69,7 @@ namespace apptray
 	// or keywords, or the start of the name's initials ("vsc" -> Visual Studio Code). Sorted by
 	// name; with a search, names or keywords starting with the first word come first, then names
 	// whose initials do, and within each group the apps opened most often. Favorites keep the
-	// user's order, Recent its time order.
+	// user's order, Recent its time order, Autostart puts "always" before "ask".
 	std::vector<size_t> FilterAppItems(
 		const std::vector<AppItem>& items, const AppFilter& filter, const std::vector<std::wstring>& favorites);
 

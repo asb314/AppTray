@@ -113,6 +113,11 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 	- **Recent** lists the last 15 apps opened from AppTray (launcher or tray menu; the logon
 		apps do not count). The status line shows the selected app's description, version (from
 		its executable, or from the folder name for scripts) and target.
+	- **Autostart** lists the apps set to open at logon: the "always" ones first, then the
+		"ask" ones; hidden apps and suites never open, so they are left out, and a missing one
+		shows "not found" (the tray menu leaves it out). The app search stays inside this list.
+		Anywhere in the launcher an app that will open shows "at logon" or "asks at logon" next
+		to its folder.
 	- Enter opens (from the folder side it moves to the apps; a running app: its window),
 		Shift+Enter opens another copy, Ctrl+Enter opens as administrator, Ctrl+D toggles a
 		favorite, Ctrl+E opens the folder, F5 rescans, Esc clears
@@ -127,7 +132,8 @@ the notification area (on Windows 11 it may start in the hidden overflow; drag i
 		shows its UAC prompt from there), what to do at logon, open without a UAC prompt, and the
 		running-app, console, PATH and keywords commands above.
 - **Right click**: favorites, the last 5 apps opened (other than favorites), "Running" (the apps
-	open now: a click switches to them), categories as menus,
+	open now: a click switches to them), "Autostart" (the logon apps, "always" ones above the
+	separator), categories as menus,
 	Refresh, Edit settings, Start with Windows, Check for a new version, About (version, the
 	hotkey, links to this repository and to the data folder), Exit, and "New version …
 	available" when there is one.

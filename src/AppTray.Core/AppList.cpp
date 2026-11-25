@@ -165,6 +165,9 @@ namespace apptray
 				return !item.lastLaunched.empty() && !item.hidden && !item.hiddenByDefault && !item.entry->missing;
 			case AppFilterKind::New:
 				return item.isNew && !item.hidden && !item.hiddenByDefault;
+			case AppFilterKind::Autostart:
+				// As PlanAutostart, but missing apps stay (marked "not found") so they can be turned off
+				return item.autostart != AutostartMode::No && !item.hidden && !item.target.empty();
 			case AppFilterKind::Category:
 				return !item.hidden && !item.hiddenByDefault && IsInCategory(item.category, filter.category);
 			case AppFilterKind::Installers:
@@ -277,6 +280,7 @@ namespace apptray
 		struct Ranked
 		{
 			size_t index = 0;
+			int group = 0;    // Autostart without a search: 0 "always", 1 "ask"
 			int match = 0;    // 2: the name (searchText does) or a keyword starts with the first word; 1: initials
 			int launches = 0; // only counts while searching
 		};
@@ -290,10 +294,18 @@ namespace apptray
 				: item.searchText.starts_with(first) || StartsAnyWord(item.keywords, first) ? 2
 				: MatchesInitials(item.initials, first)                                       ? 1
 				                                                                              : 0;
-			ranked.push_back({index, match, first.empty() ? 0 : item.launchCount});
+			const int group = filter.kind == AppFilterKind::Autostart && words.empty()
+					&& item.autostart == AutostartMode::Ask
+				? 1
+				: 0;
+			ranked.push_back({index, group, match, first.empty() ? 0 : item.launchCount});
 		}
 		std::stable_sort(ranked.begin(), ranked.end(), [&](const Ranked& a, const Ranked& b)
 			{
+				if (a.group != b.group)
+				{
+					return a.group < b.group;
+				}
 				if (a.match != b.match)
 				{
 					return a.match > b.match;

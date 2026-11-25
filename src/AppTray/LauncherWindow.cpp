@@ -482,6 +482,7 @@ namespace apptray
 		addFixed(AppFilterKind::Recent, text::Recent, false);
 		addFixed(AppFilterKind::All, text::All, true);
 		addFixed(AppFilterKind::New, text::New, false);
+		addFixed(AppFilterKind::Autostart, text::Autostart, false);
 		AddCategoryNodes(
 			TVI_ROOT, FilterCategoryTree(BuildCategoryTree(items, app_.Settings().categoryDepth), folderFilter_));
 		addFixed(AppFilterKind::Installers, text::InstallersAndCopies, false);
@@ -1011,6 +1012,13 @@ namespace apptray
 				if (item.isNew)
 				{
 					text = std::format(L"{}  ·  {}", text::NewTag, text);
+				}
+				// Only where it would really open at logon (PlanAutostart)
+				if (item.autostart != AutostartMode::No && !item.hidden && !item.entry->missing && !item.target.empty())
+				{
+					const wchar_t* tag = item.autostart == AutostartMode::Always ? text::AutostartAlwaysTag
+																			  : text::AutostartAskTag;
+					text = std::format(L"{}  ·  {}", tag, text);
 				}
 				if (item.running)
 				{
